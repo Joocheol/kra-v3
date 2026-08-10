@@ -1,0 +1,150 @@
+name: ChatGPT adversarial critique
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions: {}
+
+concurrency:
+  group: gpt-critique-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: >-
+      github.event.label.name == 'gpt-critique' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Consume trigger label and pin head
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            await github.rest.issues.removeLabel({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              name: 'gpt-critique',
+            });
+            const latest = await github.rest.pulls.get({
+              owner: context.repo.owner, repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+            });
+            if (latest.data.head.sha !== context.payload.pull_request.head.sha) {
+              core.setFailed('PR head changed after the label event. Apply gpt-critique again.');
+              return;
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: [
+                'ChatGPT 적대적 비평을 시작합니다.',
+                '',
+                '- 대상: REVIEW_REQUEST.md 가 지정한 문서만 (코드·원시데이터 접근 없음)',
+                '- 판정 의무 항목 최대 7개, 파급 진술 미달은 자동 강등',
+                '- 파일 수정·병합 없음',
+              ].join('\n'),
+            });
+
+  critique:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      critique: ${{ steps.validate.outputs.critique }}
+      binding_count: ${{ steps.validate.outputs.binding_count }}
+    steps:
+      - name: Check out immutable PR head
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install
+        run: pip install -r requirements.txt
+
+      - name: Run critique
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+        run: |
+          test -s REVIEW_REQUEST.md
+          python scripts/critique.py --from-request REVIEW_REQUEST.md \
+            --emit-json-only > .critique.json
+          test -s .critique.json
+
+      - name: Deterministically validate critic output
+        id: validate
+        env:
+          GPT_CRITIQUE: .critique.json
+        run: node .github/ai-review/validate-critique.mjs
+
+      - name: Upload critique record
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: gpt-critique-${{ github.event.pull_request.number }}
+          path: |
+            .critique.json
+            review/
+          if-no-files-found: warn
+          retention-days: 30
+
+  report:
+    needs: [prepare, critique]
+    if: always() && needs.prepare.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Publish critique
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        env:
+          CRITIQUE_RESULT: ${{ needs.critique.result }}
+          CRITIQUE_JSON: ${{ needs.critique.outputs.critique }}
+        with:
+          script: |
+            const ok = process.env.CRITIQUE_RESULT === 'success';
+            const lines = [
+              ok ? '## ChatGPT 비평 완료' : '## ChatGPT 비평 중단',
+              '', `- 상태: ${process.env.CRITIQUE_RESULT}`,
+              '- 자동 수정·병합: 수행하지 않음',
+            ];
+            if (ok && process.env.CRITIQUE_JSON) {
+              const c = JSON.parse(process.env.CRITIQUE_JSON);
+              lines.push('', `판정 의무 항목 **${c.binding.length}개**. `
+                + `\`review/RESPONSE_${c.tag}_r${c.round}.md\` 에 전부 판정해야 게이트가 열립니다.`);
+              for (const it of c.binding) {
+                const flag = it.requires_author_decision ? ' · 저자 판단 필요' : '';
+                lines.push('',
+                  `**${it.id}${flag}** ${it.title}`,
+                  `- 지적: ${it.claim.slice(0, 1500)}`,
+                  `- 문서 근거: ${it.evidence_in_report.slice(0, 1000)}`,
+                  `- 파급: ${it.impact.slice(0, 1000)}`,
+                  `- 확인 방법: ${it.suggested_check.slice(0, 600)}`);
+              }
+              if (c.advisory.length) {
+                lines.push('', '### 참고 항목 (판정 불요)');
+                for (const it of c.advisory) lines.push(`- **${it.id}** ${it.title}`);
+              }
+            } else {
+              lines.push('', 'Actions 로그를 확인한 뒤 라벨을 다시 붙이십시오.');
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: lines.join('\n').slice(0, 64000),
+            });
