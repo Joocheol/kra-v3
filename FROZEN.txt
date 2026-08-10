@@ -1,0 +1,22 @@
+# 동결 산출물 목록
+#
+# 여기 적힌 파일은 재생성했을 때 커밋본과 일치해야 한다. 불일치하면 CI가 실패하고
+# PR은 머지되지 않는다. 이것이 v3의 분석 동결이다 — 규율이 아니라 머지 차단 조건.
+#
+# 형식:  <허용오차>  <경로>
+#
+# 허용오차:
+#   byte      바이트 동일. 결정론적 산출물의 기본값.
+#   numeric   수치는 rtol/atol 이내, 키 컬럼은 레코드 완전 일치, 렌더된 표는 바이트 동일.
+#             BLAS/LAPACK 반올림 드리프트만 흡수한다. 보고 정밀도보다 몇 자릿수 엄격해야 한다.
+#   invariant 재현을 요구하지 않는다. scripts/check_invariants.py 가 정의한 불변식만 검사.
+#             solver 시간제한, MILP, 조기종료 등 비결정 성분에만 쓴다.
+#             이 등급을 붙이려면 왜 결정론적일 수 없는지 CONVENTIONS.md 에 근거를 남긴다.
+#
+# 새 항목을 추가하는 것은 "이 숫자는 이제 확정이다"라는 선언이다.
+# 제거하는 것은 동결 해제이므로 OPEN_ITEMS.md 에 사유를 남긴다.
+
+# byte      outputs/sample_flow.csv
+# byte      outputs/data_audit_manifest.json
+# numeric   outputs/main_calibration.csv
+# invariant outputs/main_milp_bounds.csv
