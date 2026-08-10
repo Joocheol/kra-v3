@@ -107,7 +107,15 @@ def build_prompt(phase: str, tag: str, inputs: list[pathlib.Path],
 # --------------------------------------------------------------------------
 # API call
 
-def call_openai(prompt: str, model: str) -> str:
+def call_openai(prompt: str, model: str) -> tuple[str, str]:
+    """Return (raw_json_text, api_used).
+
+    Newer OpenAI models are served through the Responses API; older ones only
+    through Chat Completions. Rather than make the caller find out which, try
+    Responses first and fall back. The API actually used is recorded in the
+    critique payload, because a change of endpoint can change output shape and
+    is therefore part of the record.
+    """
     try:
         from openai import OpenAI
     except ImportError:
@@ -122,22 +130,46 @@ def call_openai(prompt: str, model: str) -> str:
         kwargs["base_url"] = os.environ["OPENAI_BASE_URL"]
     client = OpenAI(**kwargs)
 
+    system = ("You are an adversarial external referee for an empirical "
+              "research project. Answer in Korean. Output a single JSON "
+              "object and nothing else.")
+    failures: list[str] = []
+
+    # 1. Responses API
+    try:
+        resp = client.responses.create(
+            model=model,
+            input=[{"role": "system", "content": system},
+                   {"role": "user", "content": prompt}],
+            text={"format": {"type": "json_object"}},
+        )
+        text = getattr(resp, "output_text", "") or ""
+        if text.strip():
+            return text, "responses"
+        failures.append("responses: empty output_text")
+    except Exception as exc:                          # noqa: BLE001
+        failures.append(f"responses: {type(exc).__name__}: {exc}")
+
+    # 2. Chat Completions
     try:
         resp = client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "system",
-                 "content": "You are an adversarial external referee for an "
-                            "empirical research project. Answer in Korean. "
-                            "Output a single JSON object and nothing else."},
-                {"role": "user", "content": prompt},
-            ],
+            messages=[{"role": "system", "content": system},
+                      {"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
         )
-    except Exception as exc:                      # noqa: BLE001
-        sys.exit(f"[critique] API call failed: {exc}")
+        text = resp.choices[0].message.content or ""
+        if text.strip():
+            return text, "chat.completions"
+        failures.append("chat.completions: empty content")
+    except Exception as exc:                          # noqa: BLE001
+        failures.append(f"chat.completions: {type(exc).__name__}: {exc}")
 
-    return resp.choices[0].message.content or ""
+    sys.exit("[critique] every API path failed for model "
+             f"{model!r}:\n  - " + "\n  - ".join(failures) +
+             "\n\nCheck that OPENAI_MODEL names a model this key can reach:\n"
+             "  curl -s https://api.openai.com/v1/models "
+             '-H "Authorization: Bearer $OPENAI_API_KEY"')
 
 
 # --------------------------------------------------------------------------
@@ -285,10 +317,13 @@ def main() -> None:
     print(f"[critique] {tag} round {args.round} -> {model} "
           f"({len(prompt):,} chars)", file=sys.stderr)
 
-    binding, advisory = enforce(parse_items(call_openai(prompt, model)))
+    raw, api_used = call_openai(prompt, model)
+    binding, advisory = enforce(parse_items(raw))
+    print(f"[critique] api={api_used}", file=sys.stderr)
 
     payload = {
         "tag": tag, "phase": args.phase, "round": args.round, "model": model,
+        "api": api_used,
         "generated_at": _dt.datetime.now().isoformat(timespec="seconds"),
         "inputs": [str(p) for p in inputs],
         "binding": binding, "advisory": advisory,
