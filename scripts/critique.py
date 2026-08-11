@@ -31,7 +31,7 @@ PROMPT_DIR = ROOT / "prompts"
 REVIEW_DIR = ROOT / "review"
 
 MAX_ITEMS = 7          # items carrying a response obligation
-MAX_ROUNDS = 2
+MAX_ROUNDS = 4          # 명세서 검토 2 + 리포트 검토 2
 MIN_IMPACT_CHARS = 30  # shorter than this is not a real impact statement
 
 VALID_PHASES = ("P0", "P1", "P2", "P3", "M")
@@ -84,16 +84,16 @@ def build_prompt(phase: str, tag: str, inputs: list[pathlib.Path],
     if round_no > 1:
         prior = REVIEW_DIR / f"RESPONSE_{tag}_r{round_no - 1}.md"
         parts.append(
-            "# 2\ub77c\uc6b4\ub4dc \uc9c0\uc2dc\n\n"
-            "\uc544\ub798\ub294 1\ub77c\uc6b4\ub4dc \ube44\ud3c9\uc5d0 \ub300\ud55c \uc800\uc790\uc758 \uc751\ub2f5\uc774\ub2e4. \uaddc\uce59:\n\n"
+            f"# {round_no}\ub77c\uc6b4\ub4dc \uc9c0\uc2dc\n\n"
+            f"\uc544\ub798\ub294 {round_no - 1}\ub77c\uc6b4\ub4dc \ube44\ud3c9\uc5d0 \ub300\ud55c \uc800\uc790\uc758 \uc751\ub2f5\uc774\ub2e4. \uaddc\uce59:\n\n"
             "- \uc774\ubbf8 \ud310\uc815\ub41c \ud56d\ubaa9\uc744 \ub2e4\uc2dc \uc81c\uae30\ud558\uc9c0 \ub9c8\ub77c. \uc800\uc790\uc758 \ubc18\ubc15\uc774 \ubd88\ucda9\ubd84\ud558\ub2e4\uace0\n"
             "  \ud310\ub2e8\ud558\ub294 \uacbd\uc6b0\uc5d0\ub9cc, **\ubc18\ubc15\uc758 \uc5b4\ub290 \ubd80\ubd84\uc774 \uc65c \ubd88\ucda9\ubd84\ud55c\uc9c0**\ub97c \uc9c0\ubaa9\ud558\uc5ec\n"
             "  \uc81c\uae30\ud558\ub77c. \ub2e8\uc21c \ubc18\ubcf5\uc740 \uae08\uc9c0\ub2e4.\n"
             "- \uc800\uc790\uac00 '\uc218\uc815'\uc73c\ub85c \ud310\uc815\ud55c \ud56d\ubaa9\uc740 \ub2e4\ub8e8\uc9c0 \ub9c8\ub77c. \uc218\uc815\ub41c \ubb38\uc11c\ub294 \ub2e4\uc74c\n"
             "  \ub2e8\uacc4\uc5d0\uc11c \ub2e4\uc2dc \uac80\ud1a0\ub41c\ub2e4.\n"
             "- \uc751\ub2f5\uc744 \uc77d\uace0 \uc0c8\ub85c \ubcf4\uc774\uac8c \ub41c \ubb38\uc81c\uac00 \uc788\uc73c\uba74 \uadf8\uac83\uc744 \uc6b0\uc120\ud558\ub77c.\n"
-            "- 2\ub77c\uc6b4\ub4dc\uac00 \ub9c8\uc9c0\ub9c9\uc774\ub2e4. \ub0a8\uae38 \uac00\uce58\uac00 \uc788\ub294 \uac83\ub9cc \ub0a8\uaca8\ub77c.\n\n"
-            "## \uc800\uc790\uc758 1\ub77c\uc6b4\ub4dc \uc751\ub2f5\n\n" + read(prior))
+            f"- \ud604\uc7ac {round_no}\ub77c\uc6b4\ub4dc\uc774\uba70 \uc0c1\ud55c\uc740 {MAX_ROUNDS}\ub77c\uc6b4\ub4dc\ub2e4. \ub0a8\uae38 \uac00\uce58\uac00 \uc788\ub294 \uac83\ub9cc \ub0a8\uaca8\ub77c.\n\n"
+            f"## \uc800\uc790\uc758 {round_no - 1}\ub77c\uc6b4\ub4dc \uc751\ub2f5\n\n" + read(prior))
 
     for p in context:
         parts.append(f"# \ucc38\uace0 \ubb38\uc11c: {p.name}\n\n{read(p)}")
