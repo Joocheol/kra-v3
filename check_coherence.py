@@ -233,7 +233,121 @@ def main() -> int:
             xs2 = sorted(xs)
             print(f"   {name:<16} 평균 {sum(xs)/len(xs):+.4f}   "
                   f"중앙값 {xs2[len(xs2)//2]:+.4f}   최소 {xs2[0]:+.4f}")
+
+    # ---- G. 삼복승 = 삼쌍승 6순열 합 --------------------------------------
+    # 삼복승 {a,b,c} 는 순서 없는 조합, 삼쌍승은 그 6가지 순서다. 두 풀이
+    # 같은 사건을 다르게 자른 것이므로 정규화 후 확률이 일치해야 한다.
+    # 이 검정은 두 페이지 계열의 **집합 매핑을 동시에** 건다 — 고정마·행·열이
+    # 어느 착순인지 한 곳이라도 틀리면 합이 맞지 않는다.
+    print("\nG. 삼복승{a,b,c} = 삼쌍승 6순열 합  (정규화 후)")
+    devs, cors = [], []
+    for rid in ids:
+        r = races[rid]
+        if not r["trio"] or not r["trifecta"]:
+            continue
+        pt = norm({k: 1 / o for k, o in r["trio"].items()})
+        pf = norm({k: 1 / o for k, o in r["trifecta"].items()})
+        agg = collections.Counter()
+        for (a, b, c), p in pf.items():
+            agg[frozenset((a, b, c))] += p
+        common = sorted(set(pt) & set(agg), key=sorted)
+        if len(common) < 5:
+            continue
+        devs.append(sum(abs(pt[k] - agg[k]) for k in common) / len(common))
+        cors.append(spearman([pt[k] for k in common], [agg[k] for k in common]))
+    if devs:
+        devs.sort(); cors.sort()
+        n = len(devs)
+        print(f"   경주 {n:,}  조합당 평균절대편차 중앙값 {devs[n//2]:.6f}")
+        print(f"   순위상관 중앙값 {cors[n//2]:+.4f}   최소 {cors[0]:+.4f}")
+
+    # ---- H. 삼복승 주변화 -> 연승, 그리고 지급 착순 수 --------------------
+    # 삼복승은 '이 세 마리가 상위 3착'이므로 k 를 포함한 조합의 확률을 모두
+    # 더하면 P(k 가 3착 안) 이 된다. 연승은 'k 가 지급 착순 안'에 거는 것이다.
+    #
+    # 주의: Σ_k Σ_{T∋k} p_trio 는 항상 정확히 3 이다. 조합마다 말이 3마리이므로
+    # 각 조합을 세 번 세기 때문이고, 이것은 항등식이지 측정이 아니다. 지급 착순
+    # 수 m 은 오버라운드 비로 구한다 — Σ1/o_연승 = m/(1-t), Σ1/o_단승 = 1/(1-t)
+    # 이므로 두 풀의 공제율이 같다면 비가 곧 m 이다.
+    print("\nH. 삼복승 주변화 → 연승, 지급 착순 수")
+    m_by_n = collections.defaultdict(list)
+    cors, mad = [], []
+    for rid in ids:
+        r = races[rid]
+        if not r["trio"] or not r["place"] or not r["win"]:
+            continue
+        sw = sum(1 / o for o in r["win"].values())
+        sp = sum(1 / o for o in r["place"].values())
+        if sw <= 0:
+            continue
+        m = sp / sw
+        n = len(r["win"])
+        m_by_n[n].append(m)
+
+        pt = norm({k: 1 / o for k, o in r["trio"].items()})
+        top3 = collections.Counter()
+        for k, p in pt.items():
+            for h in k:
+                top3[h] += p
+        share = norm({h: 1 / o for h, o in r["place"].items()})
+        hs = sorted(set(top3) & set(share))
+        if len(hs) < 3:
+            continue
+        cors.append(spearman([top3[h] for h in hs], [share[h] for h in hs]))
+        # 측정한 m 으로 연승을 확률로 되돌려 삼복승과 크기까지 비교한다
+        mad.append(sum(abs(top3[h] - m * share[h]) for h in hs) / len(hs))
+    if cors:
+        cors.sort(); mad.sort()
+        print(f"   순위상관 중앙값 {cors[len(cors)//2]:+.4f}   최소 {cors[0]:+.4f}")
+        print(f"   P(3착 안) 크기 비교 평균절대편차 중앙값 {mad[len(mad)//2]:.4f}")
+    print("   지급 착순 수 m = Σ1/o(연승) / Σ1/o(단승):")
+    for n in sorted(m_by_n):
+        xs = sorted(m_by_n[n])
+        print(f"     출전 {n:>2}두  중앙값 {xs[len(xs)//2]:.3f}   "
+              f"[{xs[0]:.3f}, {xs[-1]:.3f}]   경주 {len(xs)}")
+
+    # ---- I. 삼복승 집합 매핑 방향 검정 ------------------------------------
+    # 두 마리를 고정하고 세 번째만 인기마/비인기마로 바꾸면, 인기마를 넣은
+    # 조합의 배당이 낮아야 한다. 집합 {고정마, 행, 열} 이 잘못 조립됐다면
+    # 이 방향이 무너진다.
+    print("\nI. 삼복승 집합 매핑 — 한 마리만 교체했을 때 방향")
+    ag = rev = theta = tot = 0
+    for rid in ids:
+        r = races[rid]
+        tr, win = r["trio"], r["win"]
+        if not tr or len(win) < 4:
+            continue
+        hs = sorted(win)
+        for i, a in enumerate(hs):
+            for b in hs[i + 1:]:
+                for j, x in enumerate(hs):
+                    if x in (a, b):
+                        continue
+                    for y in hs[j + 1:]:
+                        if y in (a, b):
+                            continue
+                        fav, dog = (x, y) if win[x] < win[y] else (y, x)
+                        if win[fav] == win[dog]:
+                            continue
+                        o1 = tr.get(frozenset((a, b, fav)))
+                        o2 = tr.get(frozenset((a, b, dog)))
+                        if o1 is None or o2 is None:
+                            continue
+                        tot += 1
+                        if o1 == 9999.9 or o2 == 9999.9:
+                            theta += 1
+                        elif o1 < o2:
+                            ag += 1
+                        elif o2 < o1:
+                            rev += 1
+    eff = ag + rev
+    if eff:
+        print(f"   전체 {tot:,}쌍 (θ 검열 {theta:,} 제외 → 판정 {eff:,})")
+        print(f"     인기마를 넣은 조합의 배당이 낮음 : {ag:,}  ({ag / eff * 100:.2f}%)")
+        print(f"     반대                             : {rev:,}  ({rev / eff * 100:.2f}%)")
+
     return 0
+
 
 
 def _direction(ids, races, pool, pick, third=False):
