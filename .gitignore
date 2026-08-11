@@ -1,6 +1,6 @@
-# 파싱 산출물은 크다. 레포에 넣지 않는다.
-outputs/parsed/cells/
-outputs/parsed/races.jsonl.gz
+# 파싱 산출물의 셀 파티션은 560MB 다. 레포에 넣지 않는다.
+데이터/cells/
+outputs/parsed/
 
 # 환경
 .venv/
