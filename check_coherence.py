@@ -346,6 +346,74 @@ def main() -> int:
         print(f"     인기마를 넣은 조합의 배당이 낮음 : {ag:,}  ({ag / eff * 100:.2f}%)")
         print(f"     반대                             : {rev:,}  ({rev / eff * 100:.2f}%)")
 
+    # ---- J. 복연승 <= 복승 (포함관계 부등식) ------------------------------
+    # 복승{a,b} 은 '둘이 상위 2착', 복연승{a,b} 은 '둘 다 상위 3착'이다.
+    # 앞 사건이 뒤 사건에 포함되므로 P(복연승) >= P(복승) 이다.
+    #
+    # 배당으로 옮길 때 주의: 복연승은 적중쌍이 3개라 Σ1/o = 3/(1-t) 이지만,
+    # 풀이 셋으로 갈리므로 o = T(1-t)/(3S) 이고 결국 두 풀 모두 P = (1-t)/o
+    # 라는 같은 형태가 된다. 공제율이 같으면(실측 둘 다 27%) 배당 부등식이
+    # 그대로 성립한다 — 허용오차가 필요 없다.
+    print("\nJ. 복연승 <= 복승  (사건 포함관계, 허용오차 없음)")
+    viol = tot = theta = 0
+    worst = []
+    for rid in ids:
+        r = races[rid]
+        for k, oq in r["quinella"].items():
+            op = r["qplace"].get(k)
+            if op is None:
+                continue
+            tot += 1
+            if oq == 9999.9 or op == 9999.9:
+                theta += 1
+            elif op > oq + 1e-9:
+                viol += 1
+                worst.append((op / oq, rid, sorted(k), oq, op))
+    if tot:
+        dec = max(1, tot - theta)
+        print(f"   검사 {tot:,}쌍 (θ {theta:,} 제외 → {dec:,}) 중 위반 {viol}"
+              f"  ({viol / dec * 100:.3f}%)")
+        for ratio, rid, pair, oq, op in sorted(worst, reverse=True)[:3]:
+            print(f"     {rid} {pair}  복승 {oq}  복연승 {op}  (비 {ratio:.2f})")
+
+    # ---- K. 주변화 상호 일치 ---------------------------------------------
+    # k 가 3착 안에 들면 k 를 포함한 복연승 적중쌍이 정확히 2개, k 가 2착 안에
+    # 들면 k 를 포함한 복승 적중쌍이 정확히 1개다. 따라서
+    #   Σ_{쌍∋k} P_복연승 / 2 = P(k 3착 안) = Σ_{조합∋k} P_삼복승
+    # 세 풀이 서로 다른 페이지에서 오므로 강한 교차 검증이다.
+    print("\nK. 주변화 상호 일치  Σ복연승/2 = Σ삼복승 = P(k 3착 안)")
+    mad, cor, le_bad = [], [], []
+    for rid in ids:
+        r = races[rid]
+        if not (r["qplace"] and r["trio"] and r["quinella"]):
+            continue
+        def marg(d):
+            c = collections.Counter()
+            for k, o in d.items():
+                for h in k:
+                    c[h] += 1 / o
+            return c
+        qp, tr, qn = marg(r["qplace"]), marg(r["trio"]), marg(r["quinella"])
+        hs = sorted(set(qp) & set(tr) & set(qn))
+        if len(hs) < 3:
+            continue
+        a = norm({h: qp[h] for h in hs})     # ∝ P(k 3착 안)
+        b = norm({h: tr[h] for h in hs})     # ∝ P(k 3착 안)
+        c_ = norm({h: qn[h] for h in hs})    # ∝ P(k 2착 안)
+        mad.append(sum(abs(a[h] - b[h]) for h in hs) / len(hs))
+        cor.append(spearman([a[h] for h in hs], [b[h] for h in hs]))
+        # 합을 각각 2, 3 으로 되돌려 P(2착 안) <= P(3착 안) 확인
+        le_bad.append(sum(1 for h in hs if 2 * c_[h] > 3 * b[h] + 1e-9) / len(hs))
+    if cor:
+        cor.sort(); mad.sort(); le_bad.sort()
+        n = len(cor)
+        print(f"   경주 {n:,}")
+        print(f"     복연승 vs 삼복승  순위상관 중앙값 {cor[n//2]:+.4f}"
+              f"   최소 {cor[0]:+.4f}")
+        print(f"     복연승 vs 삼복승  평균절대편차 중앙값 {mad[n//2]:.5f}")
+        print(f"     P(2착 안) > P(3착 안) 인 말 비율 중앙값 "
+              f"{le_bad[n//2]*100:.2f}%   최대 {le_bad[-1]*100:.1f}%")
+
     return 0
 
 
