@@ -21,3 +21,5 @@ __pycache__/
 *.blg
 *.toc
 *.pdf
+outputs/p0/odd_tokens.csv
+outputs/p0/odd_tokens_summary.csv
