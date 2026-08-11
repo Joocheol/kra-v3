@@ -1,0 +1,50 @@
+# p0_sample.py --phase sample  (stop-and-report)
+# strata.csv sha256: eef675a0e93694a246a1db8a503735b68daf59be2a480554193ca6cb0633923a
+# theta stratum column: has_theta_base
+
+
+중단: 층 설계와 표본 크기 40이 맞지 않는다.
+
+  - 빈 층 2개: meet1/2025/le7, meet3/2025/le7
+
+관측된 층 분포 (meet x year x 등록두수):
+  meet1 / 2016 / le7   : 22
+  meet1 / 2016 / 8to10 : 206
+  meet1 / 2016 / ge11  : 395
+  meet1 / 2018 / le7   : 32
+  meet1 / 2018 / 8to10 : 345
+  meet1 / 2018 / ge11  : 723
+  meet1 / 2022 / le7   : 21
+  meet1 / 2022 / 8to10 : 316
+  meet1 / 2022 / ge11  : 648
+  meet1 / 2025 / le7   : 0
+  meet1 / 2025 / 8to10 : 309
+  meet1 / 2025 / ge11  : 722
+  meet2 / 2016 / le7   : 47
+  meet2 / 2016 / 8to10 : 387
+  meet2 / 2016 / ge11  : 49
+  meet2 / 2018 / le7   : 42
+  meet2 / 2018 / 8to10 : 620
+  meet2 / 2018 / ge11  : 153
+  meet2 / 2022 / le7   : 4
+  meet2 / 2022 / 8to10 : 552
+  meet2 / 2022 / ge11  : 129
+  meet2 / 2025 / le7   : 5
+  meet2 / 2025 / 8to10 : 701
+  meet2 / 2025 / ge11  : 1
+  meet3 / 2016 / le7   : 27
+  meet3 / 2016 / 8to10 : 153
+  meet3 / 2016 / ge11  : 253
+  meet3 / 2018 / le7   : 48
+  meet3 / 2018 / 8to10 : 285
+  meet3 / 2018 / ge11  : 455
+  meet3 / 2022 / le7   : 13
+  meet3 / 2022 / 8to10 : 262
+  meet3 / 2022 / ge11  : 411
+  meet3 / 2025 / le7   : 0
+  meet3 / 2025 / 8to10 : 135
+  meet3 / 2025 / ge11  : 553
+
+표본 크기는 비평 답변(r2-K7)의 근거이므로 임의로 조정하지 않는다.
+
+EXIT=1  sample_40.json 미생성

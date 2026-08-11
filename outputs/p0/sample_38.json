@@ -1,0 +1,991 @@
+{
+  "spec": "SPEC_P0 4.3 (r2-K7, 2026-08-11 표본 크기 판정)",
+  "purpose": "재수집 실행 전에 고정하는 바이트 대조 표본과 독립 전사 표본",
+  "source": {
+    "strata_csv": "outputs/p0/strata.csv",
+    "strata_csv_sha256": "eef675a0e93694a246a1db8a503735b68daf59be2a480554193ca6cb0633923a",
+    "n_races_in_archive": 19301,
+    "n_races_in_frame": 9024
+  },
+  "selection_rule": {
+    "ordering": "sha256(race_id.encode('utf-8')) hex, ascending",
+    "determinism": "난수 종자 없음, 시각 없음, 사람의 선택 없음",
+    "frame": "연도 층 [2016, 2018, 2022, 2025]에 속한 경주만. 그 외 연도는 어느 연도 층에도 없다",
+    "theta_column": "has_theta_base"
+  },
+  "quota_rule": {
+    "sample_size": 38,
+    "sample_size_is_derived": "표본 크기는 층 설계에서 나온다. 40을 맞추려고 층을 바꾸지 않는다.",
+    "cross": {
+      "factors": [
+        "meet(3)",
+        "year(4)",
+        "size_band(3)"
+      ],
+      "n_cells_designed": 36,
+      "n_cells_empty": 2,
+      "n_cells_filled": 34,
+      "per_cell": 1,
+      "subtotal": 34
+    },
+    "empty_cells": [
+      {
+        "meet": 1,
+        "year": 2025,
+        "size_band": "le7",
+        "quota": 0,
+        "reason": "아카이브에 해당 경주가 0건"
+      },
+      {
+        "meet": 3,
+        "year": 2025,
+        "size_band": "le7",
+        "quota": 0,
+        "reason": "아카이브에 해당 경주가 0건"
+      }
+    ],
+    "coverage": {
+      "strata": [
+        "cancel",
+        "theta"
+      ],
+      "per_stratum": 2,
+      "subtotal": 4
+    },
+    "rejected_alternatives": [
+      "빈 층 몫을 다른 층에 배분해 40을 유지",
+      "연도 층을 제거",
+      "등록두수 경계를 옮겨 빈 층을 채움"
+    ],
+    "rejected_because": "층은 검사 목적에 맞춰 정한 것이다(≤7은 착순 규칙이 갈리는 경계). 데이터 사정으로 층을 바꾸면 r2-K3이 지적한 사후 자유도가 된다. 빈 층은 데이터의 사실이므로 그대로 둔다.",
+    "not_fixed_by_spec": "SPEC_P0 4.3은 층 목록을 고정하지만, 커버리지 층 둘에 2/2로 나누는 것까지는 적지 않는다. 이 분할은 이 파일의 결정이며 연구자 판단 대상이다."
+  },
+  "zero_mismatch_upper_bound_95": {
+    "value": 0.0758,
+    "percent": "7.58%",
+    "rule": "1 - 0.05^(1/n), 이항 단측 95% 상한, 불일치 0건일 때",
+    "meaning": "이 표본에서 불일치 0건이 나와도 말할 수 있는 것은 불일치율이 약 7.6% 미만이라는 것뿐이다. 그 이상을 주장하지 않는다."
+  },
+  "allocation": [
+    {
+      "stratum": {
+        "meet": 1,
+        "year": 2016,
+        "size_band": "le7"
+      },
+      "kind": "cross",
+      "n_available": 22,
+      "quota": 1,
+      "selected": [
+        "2016-09-10_1_07"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 1,
+        "year": 2016,
+        "size_band": "8to10"
+      },
+      "kind": "cross",
+      "n_available": 206,
+      "quota": 1,
+      "selected": [
+        "2016-06-11_1_10"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 1,
+        "year": 2016,
+        "size_band": "ge11"
+      },
+      "kind": "cross",
+      "n_available": 395,
+      "quota": 1,
+      "selected": [
+        "2016-11-26_1_08"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 1,
+        "year": 2018,
+        "size_band": "le7"
+      },
+      "kind": "cross",
+      "n_available": 32,
+      "quota": 1,
+      "selected": [
+        "2018-06-10_1_05"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 1,
+        "year": 2018,
+        "size_band": "8to10"
+      },
+      "kind": "cross",
+      "n_available": 345,
+      "quota": 1,
+      "selected": [
+        "2018-10-21_1_08"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 1,
+        "year": 2018,
+        "size_band": "ge11"
+      },
+      "kind": "cross",
+      "n_available": 723,
+      "quota": 1,
+      "selected": [
+        "2018-11-11_1_07"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 1,
+        "year": 2022,
+        "size_band": "le7"
+      },
+      "kind": "cross",
+      "n_available": 21,
+      "quota": 1,
+      "selected": [
+        "2022-05-14_1_03"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 1,
+        "year": 2022,
+        "size_band": "8to10"
+      },
+      "kind": "cross",
+      "n_available": 316,
+      "quota": 1,
+      "selected": [
+        "2022-11-13_1_04"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 1,
+        "year": 2022,
+        "size_band": "ge11"
+      },
+      "kind": "cross",
+      "n_available": 648,
+      "quota": 1,
+      "selected": [
+        "2022-01-08_1_03"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 1,
+        "year": 2025,
+        "size_band": "le7"
+      },
+      "kind": "cross",
+      "n_available": 0,
+      "quota": 0,
+      "selected": [],
+      "empty": true,
+      "note": "이 층에 해당하는 경주가 아카이브에 없다. 정원 0."
+    },
+    {
+      "stratum": {
+        "meet": 1,
+        "year": 2025,
+        "size_band": "8to10"
+      },
+      "kind": "cross",
+      "n_available": 309,
+      "quota": 1,
+      "selected": [
+        "2025-02-15_1_11"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 1,
+        "year": 2025,
+        "size_band": "ge11"
+      },
+      "kind": "cross",
+      "n_available": 722,
+      "quota": 1,
+      "selected": [
+        "2025-04-13_1_11"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 2,
+        "year": 2016,
+        "size_band": "le7"
+      },
+      "kind": "cross",
+      "n_available": 47,
+      "quota": 1,
+      "selected": [
+        "2016-08-27_2_07"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 2,
+        "year": 2016,
+        "size_band": "8to10"
+      },
+      "kind": "cross",
+      "n_available": 387,
+      "quota": 1,
+      "selected": [
+        "2016-10-28_2_04"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 2,
+        "year": 2016,
+        "size_band": "ge11"
+      },
+      "kind": "cross",
+      "n_available": 49,
+      "quota": 1,
+      "selected": [
+        "2016-10-22_2_07"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 2,
+        "year": 2018,
+        "size_band": "le7"
+      },
+      "kind": "cross",
+      "n_available": 42,
+      "quota": 1,
+      "selected": [
+        "2018-08-24_2_01"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 2,
+        "year": 2018,
+        "size_band": "8to10"
+      },
+      "kind": "cross",
+      "n_available": 620,
+      "quota": 1,
+      "selected": [
+        "2018-04-27_2_01"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 2,
+        "year": 2018,
+        "size_band": "ge11"
+      },
+      "kind": "cross",
+      "n_available": 153,
+      "quota": 1,
+      "selected": [
+        "2018-01-19_2_02"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 2,
+        "year": 2022,
+        "size_band": "le7"
+      },
+      "kind": "cross",
+      "n_available": 4,
+      "quota": 1,
+      "selected": [
+        "2022-11-26_2_02"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 2,
+        "year": 2022,
+        "size_band": "8to10"
+      },
+      "kind": "cross",
+      "n_available": 552,
+      "quota": 1,
+      "selected": [
+        "2022-06-25_2_06"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 2,
+        "year": 2022,
+        "size_band": "ge11"
+      },
+      "kind": "cross",
+      "n_available": 129,
+      "quota": 1,
+      "selected": [
+        "2022-11-26_2_07"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 2,
+        "year": 2025,
+        "size_band": "le7"
+      },
+      "kind": "cross",
+      "n_available": 5,
+      "quota": 1,
+      "selected": [
+        "2025-09-27_2_04"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 2,
+        "year": 2025,
+        "size_band": "8to10"
+      },
+      "kind": "cross",
+      "n_available": 701,
+      "quota": 1,
+      "selected": [
+        "2025-04-11_2_08"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 2,
+        "year": 2025,
+        "size_band": "ge11"
+      },
+      "kind": "cross",
+      "n_available": 1,
+      "quota": 1,
+      "selected": [
+        "2025-12-27_2_04"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 3,
+        "year": 2016,
+        "size_band": "le7"
+      },
+      "kind": "cross",
+      "n_available": 27,
+      "quota": 1,
+      "selected": [
+        "2016-10-21_3_10"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 3,
+        "year": 2016,
+        "size_band": "8to10"
+      },
+      "kind": "cross",
+      "n_available": 153,
+      "quota": 1,
+      "selected": [
+        "2016-08-19_3_05"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 3,
+        "year": 2016,
+        "size_band": "ge11"
+      },
+      "kind": "cross",
+      "n_available": 253,
+      "quota": 1,
+      "selected": [
+        "2016-09-02_3_02"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 3,
+        "year": 2018,
+        "size_band": "le7"
+      },
+      "kind": "cross",
+      "n_available": 48,
+      "quota": 1,
+      "selected": [
+        "2018-07-06_3_09"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 3,
+        "year": 2018,
+        "size_band": "8to10"
+      },
+      "kind": "cross",
+      "n_available": 285,
+      "quota": 1,
+      "selected": [
+        "2018-04-20_3_05"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 3,
+        "year": 2018,
+        "size_band": "ge11"
+      },
+      "kind": "cross",
+      "n_available": 455,
+      "quota": 1,
+      "selected": [
+        "2018-01-26_3_02"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 3,
+        "year": 2022,
+        "size_band": "le7"
+      },
+      "kind": "cross",
+      "n_available": 13,
+      "quota": 1,
+      "selected": [
+        "2022-07-03_3_06"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 3,
+        "year": 2022,
+        "size_band": "8to10"
+      },
+      "kind": "cross",
+      "n_available": 262,
+      "quota": 1,
+      "selected": [
+        "2022-04-17_3_01"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 3,
+        "year": 2022,
+        "size_band": "ge11"
+      },
+      "kind": "cross",
+      "n_available": 411,
+      "quota": 1,
+      "selected": [
+        "2022-10-16_3_05"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 3,
+        "year": 2025,
+        "size_band": "le7"
+      },
+      "kind": "cross",
+      "n_available": 0,
+      "quota": 0,
+      "selected": [],
+      "empty": true,
+      "note": "이 층에 해당하는 경주가 아카이브에 없다. 정원 0."
+    },
+    {
+      "stratum": {
+        "meet": 3,
+        "year": 2025,
+        "size_band": "8to10"
+      },
+      "kind": "cross",
+      "n_available": 135,
+      "quota": 1,
+      "selected": [
+        "2025-01-17_3_02"
+      ]
+    },
+    {
+      "stratum": {
+        "meet": 3,
+        "year": 2025,
+        "size_band": "ge11"
+      },
+      "kind": "cross",
+      "n_available": 553,
+      "quota": 1,
+      "selected": [
+        "2025-01-12_3_06"
+      ]
+    },
+    {
+      "stratum": {
+        "coverage": "cancel"
+      },
+      "kind": "coverage",
+      "n_available": 1047,
+      "quota": 2,
+      "selected": [
+        "2022-05-22_1_01",
+        "2022-01-23_1_11"
+      ]
+    },
+    {
+      "stratum": {
+        "coverage": "theta"
+      },
+      "kind": "coverage",
+      "n_available": 286,
+      "quota": 2,
+      "selected": [
+        "2025-10-26_3_03",
+        "2016-11-20_3_05"
+      ]
+    }
+  ],
+  "sample": [
+    {
+      "race_id": "2025-04-13_1_11",
+      "sha256": "0000330c07ba585f957c36e49a14803a6ef166d644a42cce963bab4485683a81",
+      "year": 2025,
+      "meet": 1,
+      "n_registered": 11,
+      "size_band": "ge11",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2022-06-25_2_06",
+      "sha256": "0013597c43cb85b0c415523fd4d02b01d3b274ab45d2904942b82a292534a583",
+      "year": 2022,
+      "meet": 2,
+      "n_registered": 10,
+      "size_band": "8to10",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2025-01-12_3_06",
+      "sha256": "001f10ad4aa44dc8b5e69bd2df71ad3e8b1c7184ecb4ccaf72ac514d2878b1be",
+      "year": 2025,
+      "meet": 3,
+      "n_registered": 12,
+      "size_band": "ge11",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2022-01-08_1_03",
+      "sha256": "0020987bd9908aa28f4d8684b36e43e7d7d430582d68cc2319cc97113a7b15c0",
+      "year": 2022,
+      "meet": 1,
+      "n_registered": 12,
+      "size_band": "ge11",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2018-01-26_3_02",
+      "sha256": "002145b4458a7f2442e26ac5d1a2a8ca2b3965b24fa97801163cfefa6d6e4137",
+      "year": 2018,
+      "meet": 3,
+      "n_registered": 12,
+      "size_band": "ge11",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 1
+    },
+    {
+      "race_id": "2018-11-11_1_07",
+      "sha256": "0027ab4b36384e4883df988b6fe781a3bb1a64699439d90855c96d5df03271ae",
+      "year": 2018,
+      "meet": 1,
+      "n_registered": 12,
+      "size_band": "ge11",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2025-04-11_2_08",
+      "sha256": "004a3f3ba109ccaf14221ec331a8aa796ee6e82ee77a5a26cb006f7e65fd9c23",
+      "year": 2025,
+      "meet": 2,
+      "n_registered": 10,
+      "size_band": "8to10",
+      "has_cancel_dash": 0,
+      "has_theta_all": 0,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2022-05-22_1_01",
+      "sha256": "0057b9771181207c0895624249456162ea01eb83c260f8a130755d6f34d1dd73",
+      "year": 2022,
+      "meet": 1,
+      "n_registered": 12,
+      "size_band": "ge11",
+      "has_cancel_dash": 1,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2018-10-21_1_08",
+      "sha256": "007a71915c239eb7baa6b16a76a011f8966560eabfdae6ab87acd316d91712e5",
+      "year": 2018,
+      "meet": 1,
+      "n_registered": 10,
+      "size_band": "8to10",
+      "has_cancel_dash": 1,
+      "has_theta_all": 0,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2018-04-27_2_01",
+      "sha256": "00864c00a09ac9452e834a0ae939bbb2fb6edb7e7ca1c35b19affc3a67cf1162",
+      "year": 2018,
+      "meet": 2,
+      "n_registered": 10,
+      "size_band": "8to10",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2022-01-23_1_11",
+      "sha256": "0090ac4e09a1e06f29fddb0e2cd1b07443d4d79c61ba48a88ffa3ff46844433c",
+      "year": 2022,
+      "meet": 1,
+      "n_registered": 12,
+      "size_band": "ge11",
+      "has_cancel_dash": 1,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2018-04-20_3_05",
+      "sha256": "00969101d2f1469225a102b1eef67dae8d6162aacd88a228dddd1c81e2d66aa9",
+      "year": 2018,
+      "meet": 3,
+      "n_registered": 9,
+      "size_band": "8to10",
+      "has_cancel_dash": 1,
+      "has_theta_all": 0,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2016-06-11_1_10",
+      "sha256": "00b1fa0acf0e2c34a44b0cd7b012e4fca9a81e27046878954a040e58d58be12c",
+      "year": 2016,
+      "meet": 1,
+      "n_registered": 9,
+      "size_band": "8to10",
+      "has_cancel_dash": 0,
+      "has_theta_all": 0,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2016-09-02_3_02",
+      "sha256": "00ba9a7dcebc35709788d70d5e8a1ad4de270cd26de05041a0fe9c0348aad5ae",
+      "year": 2016,
+      "meet": 3,
+      "n_registered": 14,
+      "size_band": "ge11",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 1
+    },
+    {
+      "race_id": "2022-10-16_3_05",
+      "sha256": "00ca80adbdfe79289a23af3ddd677d5c182bcecf89c44167cec40ef7ec005f47",
+      "year": 2022,
+      "meet": 3,
+      "n_registered": 11,
+      "size_band": "ge11",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2016-10-28_2_04",
+      "sha256": "00d6c3c5a4f6b1774d0d012871cd7701ce082b381c87b2b068a9b3f468f8f8c2",
+      "year": 2016,
+      "meet": 2,
+      "n_registered": 10,
+      "size_band": "8to10",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2018-01-19_2_02",
+      "sha256": "00ee3c16262a0519c5815d29955b74b35784d5cd008b3b65e0c2c244ca73f10f",
+      "year": 2018,
+      "meet": 2,
+      "n_registered": 12,
+      "size_band": "ge11",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2016-08-19_3_05",
+      "sha256": "01010617212a737deeda6c00f142b5aa5c1dc46dfe0e83aba75516c06e1bbdce",
+      "year": 2016,
+      "meet": 3,
+      "n_registered": 9,
+      "size_band": "8to10",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2025-02-15_1_11",
+      "sha256": "0111074ad6d07b5367b179b312e648a614cd6db78d5a868f52827be8aa1e68a6",
+      "year": 2025,
+      "meet": 1,
+      "n_registered": 10,
+      "size_band": "8to10",
+      "has_cancel_dash": 1,
+      "has_theta_all": 0,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2016-11-26_1_08",
+      "sha256": "015e5d0c1f33abaf135a2718f7b7e0899c3b7e34c9397114a8697fb5ef70e410",
+      "year": 2016,
+      "meet": 1,
+      "n_registered": 12,
+      "size_band": "ge11",
+      "has_cancel_dash": 1,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2025-12-27_2_04",
+      "sha256": "01642d331cc5b3f69868e3fc1f74c5c36d9bfd4320f52988c92fc17aa5dc821e",
+      "year": 2025,
+      "meet": 2,
+      "n_registered": 12,
+      "size_band": "ge11",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2025-01-17_3_02",
+      "sha256": "01ef67a1eef8eba017030c1eba246a6d0c2383c265528ff441434196117be2eb",
+      "year": 2025,
+      "meet": 3,
+      "n_registered": 9,
+      "size_band": "8to10",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2025-10-26_3_03",
+      "sha256": "0268d4d11b6b37968f4fa3b209565756293c87a588dfb1e85079213c416d4afd",
+      "year": 2025,
+      "meet": 3,
+      "n_registered": 16,
+      "size_band": "ge11",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 1
+    },
+    {
+      "race_id": "2022-11-13_1_04",
+      "sha256": "027802d079d227b3946c5e4abf7d41dcbd60657adacae02d620414d6db9ee8b2",
+      "year": 2022,
+      "meet": 1,
+      "n_registered": 10,
+      "size_band": "8to10",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2016-11-20_3_05",
+      "sha256": "02929e5badc1ae1daa106206700bdef70095ac341d020300da9f5df89cebdc6c",
+      "year": 2016,
+      "meet": 3,
+      "n_registered": 13,
+      "size_band": "ge11",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 1
+    },
+    {
+      "race_id": "2022-05-14_1_03",
+      "sha256": "02fa320bb36348c258f79f0a3749b6404a44f230e05ff29ed1db7a60e5604d91",
+      "year": 2022,
+      "meet": 1,
+      "n_registered": 7,
+      "size_band": "le7",
+      "has_cancel_dash": 0,
+      "has_theta_all": 0,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2018-08-24_2_01",
+      "sha256": "04020d1bd818ee362686db53e36aebbe5df029220acfe4b9d811cb9ad77a8794",
+      "year": 2018,
+      "meet": 2,
+      "n_registered": 7,
+      "size_band": "le7",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2018-07-06_3_09",
+      "sha256": "049d2eab5dd8fb8ac2e452f08c5f6aa71b657cc28efdd6a9a9f3a0b3706a9762",
+      "year": 2018,
+      "meet": 3,
+      "n_registered": 7,
+      "size_band": "le7",
+      "has_cancel_dash": 0,
+      "has_theta_all": 0,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2016-08-27_2_07",
+      "sha256": "04ad1fdf95fe4584ff7f32dcce27b4c2950d08c51e5e1ab6cdf4b63fe76a8e42",
+      "year": 2016,
+      "meet": 2,
+      "n_registered": 7,
+      "size_band": "le7",
+      "has_cancel_dash": 0,
+      "has_theta_all": 0,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2022-04-17_3_01",
+      "sha256": "04c8516d9769bea752330f3e0dbcefde938ac4faee8aef65025683b5a4c54f1d",
+      "year": 2022,
+      "meet": 3,
+      "n_registered": 8,
+      "size_band": "8to10",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2022-11-26_2_07",
+      "sha256": "04fc7433f8ac476d25c39eedaf7d11f549f281c7d0e3f0aabcb1123c906fd5b3",
+      "year": 2022,
+      "meet": 2,
+      "n_registered": 12,
+      "size_band": "ge11",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2016-10-22_2_07",
+      "sha256": "0512f17d92273c9b5d1f89ffb2c8d789e923c4572b3b2133c5c097565d27c25a",
+      "year": 2016,
+      "meet": 2,
+      "n_registered": 11,
+      "size_band": "ge11",
+      "has_cancel_dash": 0,
+      "has_theta_all": 1,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2018-06-10_1_05",
+      "sha256": "09f7f62862a0b32de9fe878c6ec103dd490d3b26ca1ac603e005b95d723f5d58",
+      "year": 2018,
+      "meet": 1,
+      "n_registered": 7,
+      "size_band": "le7",
+      "has_cancel_dash": 0,
+      "has_theta_all": 0,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2016-10-21_3_10",
+      "sha256": "0e440c33a6ace441e59e12682805f76c619fc0b7aa3a71fa7a1dc4a7285234a9",
+      "year": 2016,
+      "meet": 3,
+      "n_registered": 7,
+      "size_band": "le7",
+      "has_cancel_dash": 0,
+      "has_theta_all": 0,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2025-09-27_2_04",
+      "sha256": "1131baf755b77bc20ba56b10c8550b985980202b7121fc272c1a5624bd82aa06",
+      "year": 2025,
+      "meet": 2,
+      "n_registered": 7,
+      "size_band": "le7",
+      "has_cancel_dash": 1,
+      "has_theta_all": 0,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2016-09-10_1_07",
+      "sha256": "1678ab57d435ef8cd24ae0025f5463afa62812bccd831786811932846a658ba7",
+      "year": 2016,
+      "meet": 1,
+      "n_registered": 7,
+      "size_band": "le7",
+      "has_cancel_dash": 0,
+      "has_theta_all": 0,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2022-07-03_3_06",
+      "sha256": "2289230529a5f758d3a17d1ff32d47e10776809931baa52e89e267e2d7060b53",
+      "year": 2022,
+      "meet": 3,
+      "n_registered": 7,
+      "size_band": "le7",
+      "has_cancel_dash": 0,
+      "has_theta_all": 0,
+      "has_theta_base": 0
+    },
+    {
+      "race_id": "2022-11-26_2_02",
+      "sha256": "9dfc2099080bc61678dd62f53db96094db4b465d414e071f9e891bb495ba349d",
+      "year": 2022,
+      "meet": 2,
+      "n_registered": 7,
+      "size_band": "le7",
+      "has_cancel_dash": 0,
+      "has_theta_all": 0,
+      "has_theta_base": 0
+    }
+  ],
+  "transcript_5": [
+    "2025-04-13_1_11",
+    "2022-06-25_2_06",
+    "2025-01-12_3_06",
+    "2022-01-08_1_03",
+    "2018-01-26_3_02"
+  ],
+  "transcript_rule": "같은 해시 순서의 상위 5개. 바이트 대조 결과를 보기 전에 정한다 (SPEC_P0 4.3)."
+}
