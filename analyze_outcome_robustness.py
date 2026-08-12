@@ -476,10 +476,24 @@ def main() -> int:
             capped_count = sum(v == 9999.9 for v in market["trifecta"].values())
             if capped_count != info["capped_cells"]:
                 raise AssertionError(f"{race_id}: capped support differs between loaders")
-            if info["individual_min"] != max(0, info["residual_min"] - (capped_count - 1) * info["cap_upper"]):
-                raise AssertionError(f"{race_id}: frozen individual minimum differs")
-            if info["individual_max"] != min(info["cap_upper"], info["residual_max"]):
-                raise AssertionError(f"{race_id}: frozen individual maximum differs")
+            if capped_count == 0:
+                if (
+                    info["residual_min"] != 0
+                    or info["residual_max"] != 0
+                    or info["individual_min"] != 0
+                    or info["individual_max"] != 0
+                ):
+                    raise AssertionError(f"{race_id}: uncapped race has nonzero capped bounds")
+            else:
+                expected_min = max(
+                    0,
+                    info["residual_min"] - (capped_count - 1) * info["cap_upper"],
+                )
+                expected_max = min(info["cap_upper"], info["residual_max"])
+                if info["individual_min"] != expected_min:
+                    raise AssertionError(f"{race_id}: frozen individual minimum differs")
+                if info["individual_max"] != expected_max:
+                    raise AssertionError(f"{race_id}: frozen individual maximum differs")
             uniform = fractional_uniform_completion(race, market["trifecta"], info)
             contexts.append({
                 "race": race, "year": race["date"][:4], "info": info,
