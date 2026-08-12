@@ -12,6 +12,10 @@ intervals by construction.  Candidate totals are then tested from closest to
 the final pool downward, stopping at the first total that preserves every
 uncapped cell.  Capped 9999.9 cells and the unresolved 1.0 lower-code cells are
 not used to select T'.
+
+The expensive search is run once at the widest reported window (5%).  Because
+we recover the *closest* valid earlier total, the 1% result is exactly the
+subset whose recovered gap is at most 1%; no second data scan is necessary.
 """
 from __future__ import annotations
 
@@ -93,7 +97,6 @@ def explain_race(values: list[Decimal], final_t: int, window_bp: int) -> tuple[i
         return final_t, 0, 1
 
     candidates: set[int] | None = None
-    # Start with the most restrictive displayed values first.
     for value in sorted(incompatible, reverse=True):
         cell = candidate_totals_for_cell(value, lo, final_t - 1)
         candidates = cell if candidates is None else candidates & cell
@@ -102,21 +105,19 @@ def explain_race(values: list[Decimal], final_t: int, window_bp: int) -> tuple[i
 
     assert candidates is not None
     n_candidates = len(candidates)
-    # Exact existence test, but stop as soon as the closest valid earlier
-    # snapshot is found.  Most candidate totals fail on one of the first few
-    # cells, so this avoids repeatedly materialising large filtered sets.
     for total in sorted(candidates, reverse=True):
         if all(displayed_ticket_interval(total * 100, value) for value in values):
             return total, len(incompatible), n_candidates
     return None, len(incompatible), n_candidates
 
 
-def run(data_dir: pathlib.Path, window_bp: int) -> dict:
+def search(data_dir: pathlib.Path, max_window_bp: int = 500) -> dict:
     races = load_races(data_dir / "races.jsonl.gz")
     cells = load_uncapped_cells(data_dir, races)
-    failing = []
+    failing_by_year: dict[str, int] = defaultdict(int)
     explained = []
-    by_year: dict[str, list[int]] = defaultdict(lambda: [0, 0])
+    failing_races = 0
+
     for race_id in sorted(races):
         values = cells.get(race_id, [])
         if not values:
@@ -130,23 +131,42 @@ def run(data_dir: pathlib.Path, window_bp: int) -> dict:
         )
         if not incompatible:
             continue
-        failing.append(race_id)
+        failing_races += 1
         year = races[race_id]["date"][:4]
-        by_year[year][0] += 1
-        best, bad, n_candidates = explain_race(values, final_t, window_bp)
+        failing_by_year[year] += 1
+        best, bad, n_candidates = explain_race(values, final_t, max_window_bp)
         if best is not None and best != final_t:
             gap_bp = (final_t - best) * 10_000 / final_t
-            explained.append((race_id, best, final_t, gap_bp, bad, n_candidates))
-            by_year[year][1] += 1
+            explained.append((race_id, year, best, final_t, gap_bp, bad, n_candidates))
 
     return {
+        "max_window_bp": max_window_bp,
+        "failing_races": failing_races,
+        "failing_by_year": dict(sorted(failing_by_year.items())),
+        "explained": explained,
+    }
+
+
+def summarize(raw: dict, window_bp: int) -> dict:
+    selected = [row for row in raw["explained"] if row[4] <= window_bp + 1e-12]
+    explained_by_year: dict[str, int] = defaultdict(int)
+    for row in selected:
+        explained_by_year[row[1]] += 1
+    by_year = {
+        year: [count, explained_by_year.get(year, 0)]
+        for year, count in raw["failing_by_year"].items()
+    }
+    return {
         "window_bp": window_bp,
-        "failing_races": len(failing),
-        "explained_races": len(explained),
-        "by_year": dict(sorted(by_year.items())),
-        "median_gap_bp": median([row[3] for row in explained]) if explained else None,
-        "max_gap_bp": max([row[3] for row in explained]) if explained else None,
-        "examples": sorted(explained, key=lambda row: row[3])[:10],
+        "failing_races": raw["failing_races"],
+        "explained_races": len(selected),
+        "by_year": by_year,
+        "median_gap_bp": median([row[4] for row in selected]) if selected else None,
+        "max_gap_bp": max([row[4] for row in selected]) if selected else None,
+        "examples": [
+            (row[0], row[2], row[3], row[4], row[5], row[6])
+            for row in sorted(selected, key=lambda row: row[4])[:10]
+        ],
     }
 
 
@@ -154,8 +174,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", type=pathlib.Path, default=pathlib.Path("데이터"))
     args = parser.parse_args()
+    raw = search(args.data_dir, max_window_bp=500)
     for window_bp in (100, 500):
-        result = run(args.data_dir, window_bp)
+        result = summarize(raw, window_bp)
         print("SNAPSHOT_DIAGNOSTIC " + json.dumps(result, ensure_ascii=False, sort_keys=True))
 
 
