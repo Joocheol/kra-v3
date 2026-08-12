@@ -1,0 +1,38 @@
+name: GPT Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      question:
+        description: "ChatGPT에게 보낼 질문"
+        required: false
+        default: "이것은 연결 테스트입니다. 지금 응답 가능한 모델명과 함께 '연결 확인됨'이라고만 답해 주세요."
+      model:
+        description: "OpenAI 모델명"
+        required: false
+        default: "gpt-5.6-sol"
+
+permissions:
+  contents: write
+
+jobs:
+  ask:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Ask ChatGPT
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          QUESTION: ${{ github.event.inputs.question }}
+          MODEL: ${{ github.event.inputs.model }}
+        run: python3 scripts/ask_gpt.py
+      - name: Commit response
+        run: |
+          git config user.name "gpt-test-bot"
+          git config user.email "actions@github.com"
+          git add findings/gpt_test_response.md
+          git commit -m "GPT 테스트 응답" || echo "변경 없음 — 커밋할 것이 없다"
+          git push
