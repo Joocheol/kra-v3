@@ -20,5 +20,7 @@ jobs:
         run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
       - name: Run unit tests
         run: python3 -m unittest discover -s tests -v
+      - name: Validate cross-market grids
+        run: python3 validate_cross_market_inputs.py
       - name: Diagnose nearby snapshot timing
         run: python3 diagnose_snapshot_mismatch.py
