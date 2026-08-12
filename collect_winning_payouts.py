@@ -25,7 +25,7 @@ import urllib.error
 import urllib.request
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from fractions import Fraction
 
 from kra.results import (
@@ -252,7 +252,7 @@ FIELDS = [
 UNMATCHED_FIELDS = ["race_id", "pool", "combination", "reason"]
 ORIENTATION_FIELDS = [
     "pool", "source_payouts", "grid_cells_found", "odds_equal",
-    "lower_code_1_0", "failures",
+    "unexplained_odds_mismatches", "failures",
 ]
 
 
@@ -342,14 +342,13 @@ def audit_grid_orientation(
         grid = found.get(key)
         if grid is not None:
             stats[pool]["found"] += 1
-        expected_grid = min(actual, DISPLAY_CAP)
+        expected_grid = min(
+            actual.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP), DISPLAY_CAP
+        )
         if grid == expected_grid:
             stats[pool]["equal"] += 1
-        elif grid == Decimal("1.0") and actual > Decimal("1.0"):
-            # The archive also uses 1.0 as a lower display code.  Preserve it
-            # as a distinct non-exact match rather than calling the axes wrong.
-            stats[pool]["lower_code"] += 1
         else:
+            stats[pool]["mismatch"] += 1
             failures.append({
                 "race_id": race_id,
                 "pool": pool,
@@ -364,8 +363,8 @@ def audit_grid_orientation(
             "source_payouts": count["source"],
             "grid_cells_found": count["found"],
             "odds_equal": count["equal"],
-            "lower_code_1_0": count["lower_code"],
-            "failures": count["source"] - count["equal"] - count["lower_code"],
+            "unexplained_odds_mismatches": count["mismatch"],
+            "failures": count["source"] - count["found"],
         })
     return rows, failures
 
@@ -408,16 +407,25 @@ def make_report(
         "각 승식의 실제 당첨조합을 행·열·고정마 축으로 역매핑하고, 미검열 배당은 "
         "실제 지급배당과 같고 상한 초과 배당은 `9999.9`인지 확인했다.",
         "",
-        "| 승식 | 상세표 지급항목 | 격자 셀 발견 | 배당 일치 | 하한코드 1.0 | 실패 |",
+        "| 승식 | 상세표 지급항목 | 격자 셀 발견 | 배당 일치 | 미해명 배당불일치 | 축 매핑 실패 |",
         "| --- | ---: | ---: | ---: | ---: | ---: |",
     ])
     for row in orientation:
         lines.append(
             f"| {row['pool']} | {row['source_payouts']:,} | "
             f"{row['grid_cells_found']:,} | {row['odds_equal']:,} | "
-            f"{row['lower_code_1_0']:,} | {row['failures']:,} |"
+            f"{row['unexplained_odds_mismatches']:,} | {row['failures']:,} |"
         )
     lines.extend([
+        "",
+        "2016-07-01 제주 8경주의 연승식 두 셀은 격자 `1.0`과 공식 지급배당 "
+        "1.5·1.3이 일치하지 않는다. `1.0`을 근거 없는 하한코드로 재분류하지 않고 "
+        "미해명 배당불일치로 계상했다. 조합 위치는 모두 발견되어 축 매핑 실패는 아니다.",
+        "",
+        "같은 경주의 3착 3번 말은 8두 출주라 연승식 지급 자격이 있지만 격자는 "
+        "`9999.9`, 공식 상세표에는 지급항목이 없다. 이는 무투표 해석과 일치하는 "
+        "직접 사례지만, 2016년 격자와 최종 배당의 시점 불일치가 함께 관측되므로 "
+        "인코딩 규정의 결정적 증명으로 사용하지 않는다.",
         "",
         "## 표본의 범위",
         "",
@@ -563,10 +571,14 @@ def main() -> int:
     orientation, orientation_failures = audit_grid_orientation(
         orientation_expected, orientation_found
     )
-    if orientation_failures:
-        for failure in orientation_failures[:20]:
-            print("orientation failure:", failure, file=sys.stderr)
-        sys.exit(f"refusing output: {len(orientation_failures)} grid orientation failures")
+    mapping_failures = [
+        failure for failure in orientation_failures
+        if failure["reason"].endswith("grid=None")
+    ]
+    for failure in orientation_failures[:20]:
+        print("orientation discrepancy:", failure, file=sys.stderr)
+    if mapping_failures:
+        sys.exit(f"refusing output: {len(mapping_failures)} grid mapping failures")
     write_csv_gz(args.out, rows)
     write_dicts_gz(args.unmatched_out, unmatched_rows, UNMATCHED_FIELDS)
     write_dicts_gz(args.orientation_out, orientation, ORIENTATION_FIELDS)

@@ -10,18 +10,18 @@ Claude의 역할은 공동저자나 자동 수정자가 아니라 **독립적이
 1. `9999.9`는 실제 상한 초과 배당과 `n=0` 무투표가 섞인 표시일 수 있다.
 2. 경주·승식별 총판매량이 고정되므로 잠재 마권 수는 서로 독립인 count가
    아니라 합계 제약을 받는 정수 빈도표다.
-3. 현재 단계는 확률모형을 붙이기 전에 반올림, 정수격자, 총판매량만으로
-   feasible set과 무투표 셀 수의 하한·상한을 계산한다.
-4. 다음 단계에서 희소 다항, Dirichlet--multinomial, 구조적 0 확장을 비교한다.
+3. 반올림, 정수격자, 총판매량만으로 feasible set과 무투표 셀 수의
+   하한·상한을 계산했다.
+4. 가상 상한의 시간외 검증, 희소 다항, Dirichlet--multinomial, 삼쌍승의
+   하위 승식 가격 재구성을 추가했다. 구조적 0은 현재 자료에서 식별하지 않는다.
 5. 엄격 경주 제외와 불일치 셀 완화 규칙을 모두 확인하고, 넓은 부분식별
    구간을 대표 결과로 해석한다.
 6. 동결 상세표·방향성 감사·미매칭 목록·압축 해제 내용 비교가 실제로
    재현되는지 확인한다.
 
-연구의 기준 문서는 `RESEARCH_PROTOCOL.md`다. 현재 결과는
-`findings/trifecta_feasible_sets.md`, 경주별 수치는
-`데이터/trifecta_feasible_sets.csv.gz`에 있다. 실제 당첨으로 참값이 드러난
-상한 초과 사례는 `findings/winning_capped_payouts.md`와
+연구의 기준 문서는 `RESEARCH_PROTOCOL.md`다. 현재 결과는 `findings/`의 여섯
+보고서에 있고, 경주·셀 단위 산출물은 `데이터/*.csv.gz`에 있다. 실제 당첨으로
+참값이 드러난 상한 초과 사례는 `findings/winning_capped_payouts.md`와
 `데이터/winning_capped_payouts.csv.gz`에 있다.
 
 ## 반드시 비판할 항목

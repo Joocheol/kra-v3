@@ -15,10 +15,18 @@ from kra.results import (
 )
 from collect_winning_payouts import _could_pay, _grid_combination
 from analyze_feasible_sets import build_rows, scan_grids, write_csv_gz
+from analyze_masked_reconstruction import (
+    bounded_integer_projection,
+    proportional_integer_allocation,
+)
+from analyze_sparse_baseline import occupancy_moments
+from analyze_dirichlet_multinomial import zero_probability
+from analyze_cross_market import marginalize, metric_row
 from kra.feasible import (
     capped_ticket_upper,
     constrained_capped_bounds,
     displayed_ticket_interval,
+    displayed_total_interval,
 )
 
 
@@ -74,6 +82,19 @@ class ResultsTest(unittest.TestCase):
         got = displayed_ticket_interval(375_638_000, Decimal("391736.8"))
         self.assertEqual(list(got), [7])
 
+    def test_total_interval_is_exact_inverse(self):
+        for total in range(1, 500):
+            for odds in (Decimal("1.0"), Decimal("7.3"), Decimal("99.9")):
+                for rounding in ("half_up", "half_even", "floor"):
+                    tickets = displayed_ticket_interval(
+                        100 * total, odds, rounding=rounding
+                    )
+                    for n in range(1, 80):
+                        totals = displayed_total_interval(
+                            n, odds, rounding=rounding
+                        )
+                        self.assertEqual(n in tickets, total in totals)
+
     def test_cap_includes_zero_plus_positive_grid(self):
         # 2016-06-10 제주 1경주: K/c is between 21 and 22.
         self.assertEqual(capped_ticket_upper(29_747_400), 21)
@@ -123,6 +144,59 @@ class ResultsTest(unittest.TestCase):
                         self.assertEqual(got.max_zero_cells, max(zero_counts))
                         self.assertEqual(got.cell_ticket_min, min(cell_values))
                         self.assertEqual(got.cell_ticket_max, max(cell_values))
+
+    def test_bounded_integer_projection_preserves_boxes_and_sum(self):
+        target = __import__("numpy").array([1.2, 4.8, 3.1])
+        lower = __import__("numpy").array([1, 2, 0])
+        upper = __import__("numpy").array([2, 5, 4])
+        got = bounded_integer_projection(target, lower, upper, 8)
+        self.assertEqual(int(got.sum()), 8)
+        self.assertTrue(((got >= lower) & (got <= upper)).all())
+
+    def test_proportional_allocation_preserves_total(self):
+        np = __import__("numpy")
+        got, probabilities = proportional_integer_allocation(
+            17, np.array([1.0, 2.0, 3.0])
+        )
+        self.assertEqual(int(got.sum()), 17)
+        self.assertAlmostEqual(float(probabilities.sum()), 1.0)
+
+    def test_uniform_occupancy_moments_match_enumeration(self):
+        for cells in range(1, 5):
+            for tickets in range(0, 5):
+                outcomes = list(product(range(cells), repeat=tickets))
+                zeros = [cells - len(set(outcome)) for outcome in outcomes]
+                mean = sum(zeros) / len(zeros)
+                variance = sum((value - mean) ** 2 for value in zeros) / len(zeros)
+                got_mean, got_variance = occupancy_moments(cells, tickets)
+                self.assertAlmostEqual(got_mean, mean)
+                self.assertAlmostEqual(got_variance, variance)
+
+    def test_dm_zero_probability_converges_to_multinomial(self):
+        cells, tickets = 7, 9
+        expected = (1 - 1 / cells) ** tickets
+        self.assertAlmostEqual(
+            zero_probability(cells, tickets, 1e8), expected, places=5
+        )
+
+    def test_trifecta_marginals_preserve_probability(self):
+        table = {
+            (1, 2, 3): .4,
+            (2, 1, 3): .3,
+            (3, 2, 1): .3,
+        }
+        got = marginalize(table)
+        for target in ("win", "exacta", "quinella", "trio"):
+            self.assertAlmostEqual(sum(got[target].values()), 1.0)
+        self.assertAlmostEqual(got["quinella"][frozenset((1, 2))], .7)
+
+    def test_cross_market_metric_rejects_mismatched_support(self):
+        truth = {1: .6, 2: .4}
+        prediction = {1: .5, 2: .4, 3: .1}
+        self.assertIsNone(metric_row(
+            "race", "2025", "residual_mid", "win", "model",
+            truth, prediction,
+        ))
 
     def test_all_grid_axis_mappings(self):
         common = {"row_header": "3", "col_header": "2", "page_variant": "1"}

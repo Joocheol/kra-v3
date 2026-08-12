@@ -53,7 +53,12 @@ for (const [index, finding] of review.findings.entries()) {
 }
 for (const [index, question] of review.author_questions.entries()) text(question, `question[${index}]`, 2000);
 
-review.needs_changes = review.findings.some((finding) => !finding.requires_author_decision);
+const derivedNeedsChanges = review.findings.some(
+  (finding) => !finding.requires_author_decision
+);
+// Never erase the reviewer's own needs_changes=true judgment.  The derived
+// flag can only make the final decision more conservative.
+review.needs_changes = review.needs_changes || derivedNeedsChanges;
 const delimiter = `CLAUDE_REVIEW_${crypto.randomUUID()}`;
 fs.appendFileSync(outputPath, [
   `review<<${delimiter}`, JSON.stringify(review), delimiter,

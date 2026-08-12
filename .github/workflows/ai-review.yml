@@ -97,23 +97,31 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Install analysis dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
       - name: Test and reproduce committed findings
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          mkdir -p .ai-review-input
+          stage="$RUNNER_TEMP/claude-evidence-stage"
+          mkdir -p "$stage"
           git diff --check "$BASE_SHA...HEAD"
           cp 데이터/trifecta_feasible_sets.csv.gz /tmp/trifecta-committed.csv.gz
           cp 데이터/winning_capped_payouts.csv.gz /tmp/winning-committed.csv.gz
           cp 데이터/winning_payout_unmatched.csv.gz /tmp/unmatched-committed.csv.gz
           cp 데이터/grid_orientation_audit.csv.gz /tmp/orientation-committed.csv.gz
-          python3 -m unittest discover -s tests -v 2>&1 | tee .ai-review-input/tests.txt
-          python3 analyze_feasible_sets.py 2>&1 | tee .ai-review-input/reproduction.txt
+          cp 데이터/masked_reconstruction_results.csv.gz /tmp/masked-committed.csv.gz
+          cp 데이터/sparse_multinomial_baseline.csv.gz /tmp/sparse-committed.csv.gz
+          cp 데이터/dirichlet_multinomial_actual.csv.gz /tmp/dm-actual-committed.csv.gz
+          cp 데이터/dirichlet_multinomial_fit.csv /tmp/dm-fit-committed.csv
+          cp 데이터/cross_market_reconstruction.csv.gz /tmp/cross-market-committed.csv.gz
+          python3 -m unittest discover -s tests -v 2>&1 | tee "$stage/tests.txt"
+          python3 analyze_feasible_sets.py 2>&1 | tee "$stage/reproduction.txt"
           cmp <(gzip -cd /tmp/trifecta-committed.csv.gz) \
             <(gzip -cd 데이터/trifecta_feasible_sets.csv.gz)
           git diff --exit-code -- findings/trifecta_feasible_sets.md
           python3 collect_winning_payouts.py --offline 2>&1 | \
-            tee .ai-review-input/winning-reproduction.txt
+            tee "$stage/winning-reproduction.txt"
           cmp <(gzip -cd /tmp/winning-committed.csv.gz) \
             <(gzip -cd 데이터/winning_capped_payouts.csv.gz)
           cmp <(gzip -cd /tmp/unmatched-committed.csv.gz) \
@@ -122,26 +130,62 @@ jobs:
             <(gzip -cd 데이터/grid_orientation_audit.csv.gz)
           git diff --exit-code -- findings/winning_capped_payouts.md \
             데이터/winning_payout_html.sha256
+          python3 analyze_masked_reconstruction.py 2>&1 | \
+            tee "$stage/masked-reproduction.txt"
+          cmp <(gzip -cd /tmp/masked-committed.csv.gz) \
+            <(gzip -cd 데이터/masked_reconstruction_results.csv.gz)
+          git diff --exit-code -- findings/masked_reconstruction.md
+          python3 analyze_sparse_baseline.py 2>&1 | \
+            tee "$stage/sparse-reproduction.txt"
+          cmp <(gzip -cd /tmp/sparse-committed.csv.gz) \
+            <(gzip -cd 데이터/sparse_multinomial_baseline.csv.gz)
+          git diff --exit-code -- findings/sparse_multinomial_baseline.md
+          python3 analyze_dirichlet_multinomial.py 2>&1 | \
+            tee "$stage/dm-reproduction.txt"
+          cmp <(gzip -cd /tmp/dm-actual-committed.csv.gz) \
+            <(gzip -cd 데이터/dirichlet_multinomial_actual.csv.gz)
+          cmp /tmp/dm-fit-committed.csv 데이터/dirichlet_multinomial_fit.csv
+          git diff --exit-code -- findings/dirichlet_multinomial.md
+          python3 analyze_cross_market.py 2>&1 | \
+            tee "$stage/cross-market-reproduction.txt"
+          cmp <(gzip -cd /tmp/cross-market-committed.csv.gz) \
+            <(gzip -cd 데이터/cross_market_reconstruction.csv.gz)
+          git diff --exit-code -- findings/cross_market_reconstruction.md
           sha256sum 데이터/races.jsonl.gz 데이터/trifecta_feasible_sets.csv.gz \
-            데이터/winning_capped_payouts.csv.gz > .ai-review-input/checksums.txt
+            데이터/winning_capped_payouts.csv.gz > "$stage/checksums.txt"
           find 데이터/cells -type f -name '*.csv.gz' -print0 | sort -z | \
-            xargs -0 sha256sum > .ai-review-input/cell-checksums.txt
+            xargs -0 sha256sum > "$stage/cell-checksums.txt"
           git diff --no-ext-diff --no-textconv --unified=80 \
-            "$BASE_SHA...HEAD" > .ai-review-input/pr.diff
-          cp findings/trifecta_feasible_sets.md .ai-review-input/
-          cp findings/winning_capped_payouts.md .ai-review-input/
+            "$BASE_SHA...HEAD" > "$stage/pr.diff"
+          cp findings/trifecta_feasible_sets.md "$stage/"
+          cp findings/winning_capped_payouts.md "$stage/"
+          cp findings/masked_reconstruction.md "$stage/"
+          cp findings/sparse_multinomial_baseline.md "$stage/"
+          cp findings/dirichlet_multinomial.md "$stage/"
+          cp findings/cross_market_reconstruction.md "$stage/"
+          cp 데이터/dirichlet_multinomial_fit.csv "$stage/"
           gzip -cd 데이터/grid_orientation_audit.csv.gz > \
-            .ai-review-input/grid_orientation_audit.csv
+            "$stage/grid_orientation_audit.csv"
           gzip -cd 데이터/winning_payout_unmatched.csv.gz > \
-            .ai-review-input/winning_payout_unmatched.csv
-          cp 데이터/winning_payout_html.sha256 .ai-review-input/
-          python3 - <<'PY' > .ai-review-input/output-sample.csv
+            "$stage/winning_payout_unmatched.csv"
+          cp 데이터/winning_payout_html.sha256 "$stage/"
+          python3 - <<'PY' > "$stage/output-sample.csv"
           import gzip
           from itertools import islice
           with gzip.open('데이터/trifecta_feasible_sets.csv.gz', 'rt', encoding='utf-8') as f:
               for line in islice(f, 0, 31):
                   print(line, end='')
           PY
+      - name: Freeze and hash review evidence
+        run: |
+          stage="$RUNNER_TEMP/claude-evidence-stage"
+          manifest="$RUNNER_TEMP/ai-review-input.sha256"
+          mkdir -p .ai-review-input
+          cp -a "$stage/." .ai-review-input/
+          find .ai-review-input -type f -print0 | sort -z | \
+            xargs -0 sha256sum | tee "$manifest"
+          cp "$manifest" .ai-review-input/manifest.sha256
+          chmod -R a-w .ai-review-input
       - name: Upload immutable evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -187,8 +231,11 @@ jobs:
             reviewer for review ${{ needs.prepare.outputs.round }} of at most 4 on PR
             #${{ github.event.pull_request.number }}. Read CLAUDE.md,
             RESEARCH_PROTOCOL.md, .ai-review-input/pr.diff, tests.txt,
-            reproduction.txt, checksums.txt, output-sample.csv, and both copied
-            findings reports. Also read winning-reproduction.txt,
+            reproduction.txt, manifest.sha256, checksums.txt,
+            output-sample.csv, and all copied findings reports. Also read
+            winning-reproduction.txt, masked-reproduction.txt,
+            sparse-reproduction.txt, dm-reproduction.txt,
+            cross-market-reproduction.txt,
             cell-checksums.txt, winning_payout_html.sha256, and the decompressed
             orientation and unmatched CSV files when needed. Inspect every changed source plus necessary surrounding
             code. Seek falsification, not reassurance. Audit the n=0 versus n>0

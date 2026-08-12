@@ -14,23 +14,51 @@
   (검열 셀의 0.006%--51.636%)
 - 불일치 셀 완화 표본의 구간: 182--2,244,248개
   (0.005%--59.458%)
-- 양의 하한 182개는 같은 날 서울 두 특이 경주에만 의존하므로 대표 결과가
-  아니라 강건성 사례로 취급
+- 양의 하한 182개는 2017년 서울 두 경주에서만 총합제약이 결속된 사례 결과이며,
+  표본 전체의 대표 추정치로 사용하지 않음
 
-자세한 결과는 다음 두 보고서에 있다.
+원자료에는 2020·2021년 파티션이 없다. 2016--2019년에는 최종 매출과 양립하지
+않는 미검열 셀이 있지만 2022--2025년에는 없으므로, 후속 확률모형과 설명력
+분석은 2022--2025년을 주표본으로 하고 2016--2019년을 별도 강건성 표본으로 둔다.
+
+## 실질 분석 결과
+
+2022--2024년으로 모형을 선택하고 2025년을 시간외 평가한 가상 상한 실험에서,
+실제 상한에 가까운 7,000배 구간의 비균등 배분모형은 대부분 균등모형으로
+수축했다. 실제 상한 셀에서 검열 잔여마권은 셀당 중앙값 191.66장이라 대칭
+다항모형과 시간외 추정 Dirichlet--multinomial 모두 기대 무투표 셀을 사실상
+0개로 예측한다. 이는 무투표가 없다는 증명이 아니다. 많은 무투표를 설명하려면
+가상 상한에서 관측한 것보다 훨씬 강한 조합 이질성이나 구조적 0 과정이 필요하지만,
+현재 자료만으로 둘을 식별할 수 없다는 뜻이다.
+
+삼쌍승 복원표를 하위 승식으로 주변화한 2025년 가격 정합성 `R²`는 단승
+0.96543, 쌍승 0.97050, 복승 0.95936, 삼복승 0.97981이다. 검열 잔여총량의
+회계적 하한·중간값·상한을 바꿔도 각 `R²` 변화는 0.0005 이내였다. 이 수치는
+풀 사이의 내부 가격 정합성이며, 실제 착순 예측력이나 시장효율성을 뜻하지 않는다.
+
+자세한 결과는 다음 보고서에 있다.
 
 - `findings/winning_capped_payouts.md`
 - `findings/trifecta_feasible_sets.md`
+- `findings/masked_reconstruction.md`
+- `findings/sparse_multinomial_baseline.md`
+- `findings/dirichlet_multinomial.md`
+- `findings/cross_market_reconstruction.md`
 
 ## 재현
 
 ```bash
+python3 -m pip install -r requirements-analysis.txt
 python3 -m unittest discover -s tests -v
 python3 analyze_feasible_sets.py
 python3 collect_winning_payouts.py --offline
+python3 analyze_masked_reconstruction.py
+python3 analyze_sparse_baseline.py
+python3 analyze_dirichlet_multinomial.py
+python3 analyze_cross_market.py
 git diff --exit-code -- \
-  findings/trifecta_feasible_sets.md \
-  findings/winning_capped_payouts.md \
+  findings \
+  데이터/dirichlet_multinomial_fit.csv \
   데이터/winning_payout_html.sha256
 ```
 

@@ -19,6 +19,7 @@ from kra.feasible import (
     capped_ticket_upper,
     constrained_capped_bounds,
     displayed_ticket_interval,
+    displayed_total_interval,
 )
 
 
@@ -31,22 +32,18 @@ NUMERIC_ODDS = re.compile(r"^[0-9]+\.[0-9]$")
 class GridTotals:
     uncensored_cells: int = 0
     capped_cells: int = 0
+    lower_code_cells: int = 0
     incompatible_cells: int = 0
     ticket_min: int = 0
     ticket_max: int = 0
-    resolved_by_floor: int = 0
-    resolved_by_half_even: int = 0
-    resolved_by_take_72: int = 0
-    resolved_by_take_75: int = 0
 
 
 FIELDS = [
     "race_id", "year", "meet", "sales_won", "total_sales_won",
     "total_tickets", "starters",
     "expected_combinations", "observed_numeric_cells", "uncensored_cells",
-    "capped_cells", "rounding_incompatible_cells", "uncensored_ticket_min",
-    "uncensored_ticket_max", "resolved_by_floor", "resolved_by_half_even",
-    "resolved_by_take_72", "resolved_by_take_75", "raw_residual_min",
+    "capped_cells", "lower_code_1_0_cells", "rounding_incompatible_cells",
+    "uncensored_ticket_min", "uncensored_ticket_max", "raw_residual_min",
     "raw_residual_max", "cap_ticket_upper", "cap_ticket_upper_strict_true",
     "strict_feasible", "feasible_residual_min",
     "feasible_residual_max", "min_unbet_cells", "max_unbet_cells",
@@ -74,6 +71,29 @@ def load_races(path: pathlib.Path) -> dict[str, dict]:
     return races
 
 
+def _validated_trifecta_cell(
+    row: dict[str, str], race: dict, seen: set[int]
+) -> Decimal | None:
+    raw = row["cell_raw"]
+    if (
+        row["section"] != "body" or row["spanned"] != "0"
+        or not NUMERIC_ODDS.fullmatch(raw)
+    ):
+        return None
+    parts = (row["page_variant"], row["col_header"], row["row_header"])
+    if not all(part.isdigit() for part in parts):
+        raise ValueError(f"{row['race_id']}: numeric cell has nonnumeric axes: {parts}")
+    combo = tuple(map(int, parts))
+    starters = set(race["horses"]) - set(race.get("scratched") or [])
+    if len(set(combo)) != 3 or not set(combo).issubset(starters):
+        raise ValueError(f"{row['race_id']}: invalid trifecta axes: {combo}")
+    code = combo[0] * 10_000 + combo[1] * 100 + combo[2]
+    if code in seen:
+        raise ValueError(f"{row['race_id']}: duplicate trifecta combination: {combo}")
+    seen.add(code)
+    return Decimal(raw)
+
+
 def scan_grids(data_dir: pathlib.Path, races: dict[str, dict]) -> dict[str, GridTotals]:
     totals = {race_id: GridTotals() for race_id in races}
     partitions = sorted((data_dir / "cells" / f"page_key={PAGE_KEY}").glob("*.csv.gz"))
@@ -84,52 +104,28 @@ def scan_grids(data_dir: pathlib.Path, races: dict[str, dict]) -> dict[str, Grid
         seen_by_race: dict[str, set[int]] = defaultdict(set)
         with gzip.open(path, "rt", encoding="utf-8", newline="") as fh:
             for row in csv.DictReader(fh):
-                raw = row["cell_raw"]
-                if (
-                    row["section"] != "body" or row["spanned"] != "0"
-                    or not NUMERIC_ODDS.fullmatch(raw)
-                ):
-                    continue
                 race = races.get(row["race_id"])
                 if race is None:
-                    raise ValueError(f"grid race missing from race table: {row['race_id']}")
-                parts = (row["page_variant"], row["col_header"], row["row_header"])
-                if not all(part.isdigit() for part in parts):
-                    raise ValueError(f"{row['race_id']}: numeric cell has nonnumeric axes: {parts}")
-                combo = tuple(map(int, parts))
-                starters = set(race["horses"]) - set(race.get("scratched") or [])
-                if len(set(combo)) != 3 or not set(combo).issubset(starters):
-                    raise ValueError(f"{row['race_id']}: invalid trifecta axes: {combo}")
-                code = combo[0] * 10_000 + combo[1] * 100 + combo[2]
-                if code in seen_by_race[row["race_id"]]:
-                    raise ValueError(f"{row['race_id']}: duplicate trifecta combination: {combo}")
-                seen_by_race[row["race_id"]].add(code)
+                    if row["section"] == "body" and NUMERIC_ODDS.fullmatch(row["cell_raw"]):
+                        raise ValueError(f"grid race missing from race table: {row['race_id']}")
+                    continue
+                value = _validated_trifecta_cell(
+                    row, race, seen_by_race[row["race_id"]]
+                )
+                if value is None:
+                    continue
+                raw = row["cell_raw"]
                 item = totals[row["race_id"]]
                 if raw == "9999.9":
                     item.capped_cells += 1
                     continue
+                if raw == "1.0":
+                    item.lower_code_cells += 1
                 sales = _won(race["sales"][POOL_LABEL])
-                candidates = displayed_ticket_interval(sales, Decimal(raw))
+                candidates = displayed_ticket_interval(sales, value)
                 item.uncensored_cells += 1
                 if not candidates:
                     item.incompatible_cells += 1
-                    odds = Decimal(raw)
-                    item.resolved_by_floor += bool(
-                        displayed_ticket_interval(sales, odds, rounding="floor")
-                    )
-                    item.resolved_by_half_even += bool(
-                        displayed_ticket_interval(sales, odds, rounding="half_even")
-                    )
-                    item.resolved_by_take_72 += bool(
-                        displayed_ticket_interval(
-                            sales, odds, take_fraction=Fraction(72, 100)
-                        )
-                    )
-                    item.resolved_by_take_75 += bool(
-                        displayed_ticket_interval(
-                            sales, odds, take_fraction=Fraction(75, 100)
-                        )
-                    )
                 else:
                     item.ticket_min += candidates.start
                     item.ticket_max += candidates.stop - 1
@@ -193,13 +189,10 @@ def build_rows(races: dict[str, dict], totals: dict[str, GridTotals]) -> list[di
             "observed_numeric_cells": observed,
             "uncensored_cells": grid.uncensored_cells,
             "capped_cells": grid.capped_cells,
+            "lower_code_1_0_cells": grid.lower_code_cells,
             "rounding_incompatible_cells": grid.incompatible_cells,
             "uncensored_ticket_min": grid.ticket_min,
             "uncensored_ticket_max": grid.ticket_max,
-            "resolved_by_floor": grid.resolved_by_floor,
-            "resolved_by_half_even": grid.resolved_by_half_even,
-            "resolved_by_take_72": grid.resolved_by_take_72,
-            "resolved_by_take_75": grid.resolved_by_take_75,
             "raw_residual_min": residual_min,
             "raw_residual_max": residual_max,
             "cap_ticket_upper": upper,
@@ -243,6 +236,15 @@ def _pct(n: int, d: int) -> str:
     return f"{100*n/d:.3f}%" if d else "해당 없음"
 
 
+def _quartiles(values: list[float]) -> tuple[float, float, float]:
+    if not values:
+        return 0.0, 0.0, 0.0
+    ordered = sorted(values)
+    def pick(p: float) -> float:
+        return ordered[round((len(ordered) - 1) * p)]
+    return pick(.25), pick(.50), pick(.75)
+
+
 def _winning_counts(path: pathlib.Path) -> tuple[int, int, int]:
     if not path.exists():
         return 0, 0, 0
@@ -255,53 +257,97 @@ def _winning_counts(path: pathlib.Path) -> tuple[int, int, int]:
     )
 
 
-def _recompute_sales_sensitivity(
+def _load_trifecta_odds(
     data_dir: pathlib.Path,
     races: dict[str, dict],
     race_ids: list[str],
-) -> list[dict]:
+) -> dict[str, list[Decimal]]:
     wanted = set(race_ids)
     odds: dict[str, list[Decimal]] = {race_id: [] for race_id in race_ids}
+    seen: dict[str, set[int]] = {race_id: set() for race_id in race_ids}
     months = {races[race_id]["date"][:7] for race_id in race_ids}
     for month in sorted(months):
         path = data_dir / "cells" / f"page_key={PAGE_KEY}" / f"{month}.csv.gz"
         with gzip.open(path, "rt", encoding="utf-8", newline="") as fh:
             for row in csv.DictReader(fh):
-                if (
-                    row["race_id"] in wanted and row["section"] == "body"
-                    and row["spanned"] == "0" and NUMERIC_ODDS.fullmatch(row["cell_raw"])
-                ):
-                    odds[row["race_id"]].append(Decimal(row["cell_raw"]))
-    out = []
-    for race_id in race_ids:
-        base = _won(races[race_id]["sales"][POOL_LABEL])
-        for basis_points in (-100, -50, 0, 50, 100):
-            sales = round(base * (10_000 + basis_points) / 10_000 / 100) * 100
-            capped = bad = ticket_min = ticket_max = 0
-            for value in odds[race_id]:
-                if value == Decimal("9999.9"):
-                    capped += 1
+                race_id = row["race_id"]
+                if race_id not in wanted:
                     continue
-                candidates = displayed_ticket_interval(sales, value)
-                if not candidates:
-                    bad += 1
-                else:
-                    ticket_min += candidates.start
-                    ticket_max += candidates.stop - 1
-            bounds = None
-            if bad == 0:
-                bounds = constrained_capped_bounds(
-                    capped, capped_ticket_upper(sales),
-                    sales // 100 - ticket_max, sales // 100 - ticket_min,
-                )
-            out.append({
-                "race_id": race_id,
-                "change": f"{basis_points / 100:+.1f}%",
-                "sales": sales,
-                "bad": bad,
-                "min_zero": bounds.min_zero_cells if bounds else "—",
-                "max_zero": bounds.max_zero_cells if bounds else "—",
-            })
+                value = _validated_trifecta_cell(row, races[race_id], seen[race_id])
+                if value is not None:
+                    odds[race_id].append(value)
+    for race_id in race_ids:
+        starters = len(races[race_id]["horses"]) - len(races[race_id].get("scratched") or [])
+        expected = starters * (starters - 1) * (starters - 2)
+        if len(odds[race_id]) != expected:
+            raise ValueError(
+                f"{race_id}: sensitivity loaded {len(odds[race_id])}, expected {expected}"
+            )
+    return odds
+
+
+def _assumption_sensitivity(
+    races: dict[str, dict],
+    race_rows: list[dict],
+    odds: dict[str, list[Decimal]],
+) -> list[dict]:
+    out = []
+    rows_by_id = {row["race_id"]: row for row in race_rows}
+    for race_id in sorted(odds):
+        base = _won(races[race_id]["sales"][POOL_LABEL])
+        for rounding in ("half_up", "floor", "half_even"):
+            for take in (Fraction(72, 100), Fraction(73, 100), Fraction(75, 100)):
+                sales = base
+                capped = bad = ticket_min = ticket_max = 0
+                for value in odds[race_id]:
+                    if value == Decimal("9999.9"):
+                        capped += 1
+                        continue
+                    candidates = displayed_ticket_interval(
+                        sales, value, rounding=rounding, take_fraction=take
+                    )
+                    if not candidates:
+                        bad += 1
+                    else:
+                        ticket_min += candidates.start
+                        ticket_max += candidates.stop - 1
+                bounds = None
+                if bad == 0:
+                    # The maintained cap event is half-up.  Alternative
+                    # rounding conventions are falsification diagnostics; in
+                    # the observed two races they are rejected by uncapped
+                    # cells before this upper bound can affect the result.
+                    bounds = constrained_capped_bounds(
+                        capped,
+                        capped_ticket_upper(sales, take_fraction=take),
+                        sales // 100 - ticket_max,
+                        sales // 100 - ticket_min,
+                    )
+                out.append({
+                    "race_id": race_id,
+                    "rounding": rounding,
+                    "take": f"{float(take):.2f}",
+                    "bad": bad,
+                    "ticket_min": ticket_min,
+                    "ticket_max": ticket_max,
+                    "min_zero": bounds.min_zero_cells if bounds else "—",
+                    "max_zero": bounds.max_zero_cells if bounds else "—",
+                    "breakdown": (
+                        bounds.min_zero_cells if bounds and bounds.min_zero_cells else "—"
+                    ),
+                })
+        maintained = next(
+            item for item in reversed(out)
+            if item["race_id"] == race_id
+            and item["rounding"] == "half_up" and item["take"] == "0.73"
+        )
+        row = rows_by_id[race_id]
+        if (
+            maintained["bad"] != 0
+            or maintained["ticket_min"] != row["uncensored_ticket_min"]
+            or maintained["ticket_max"] != row["uncensored_ticket_max"]
+        ):
+            raise AssertionError(f"{race_id}: sensitivity path differs from main scan")
     return out
 
 
@@ -336,6 +382,7 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
     uncapped_fail = [r for r in uncapped if not r["strict_feasible"]]
     uncapped_clean = [r for r in uncapped if not r["rounding_incompatible_cells"]]
     incompatible = [r for r in rows if r["rounding_incompatible_cells"]]
+    capped_clean = [r for r in capped if not r["rounding_incompatible_cells"]]
     forced = [r for r in feasible if r["min_unbet_cells"] > 0]
     feasible_cells = sum(r["capped_cells"] for r in feasible)
     lower_zeros = sum(r["min_unbet_cells"] for r in feasible)
@@ -344,6 +391,8 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
     relaxed_lower = sum(r["relaxed_min_unbet_cells"] for r in relaxed)
     relaxed_upper = sum(r["relaxed_max_unbet_cells"] for r in relaxed)
     bad_cells = sum(r["rounding_incompatible_cells"] for r in rows)
+    lower_code_cells = sum(r["lower_code_1_0_cells"] for r in rows)
+    lower_code_races = sum(bool(r["lower_code_1_0_cells"]) for r in rows)
     strict_true = [r for r in capped if r["strict_true_cap_feasible"]]
     boundary_changed = [
         r for r in rows if r["cap_ticket_upper"] != r["cap_ticket_upper_strict_true"]
@@ -351,6 +400,21 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
     winning_total, winning_trifecta, winning_races = _winning_counts(
         data_dir / "winning_capped_payouts.csv.gz"
     )
+    pre = [r for r in capped if r["year"] <= "2019"]
+    post = [r for r in capped if r["year"] >= "2022"]
+    pre_feasible = [r for r in pre if r["strict_feasible"]]
+    post_feasible = [r for r in post if r["strict_feasible"]]
+    uncapped_width = [
+        (r["uncensored_ticket_max"] - r["uncensored_ticket_min"]) / r["total_tickets"]
+        for r in uncapped_clean if r["total_tickets"]
+    ]
+    uncapped_center = [
+        abs(2 * r["total_tickets"] - r["uncensored_ticket_min"]
+            - r["uncensored_ticket_max"]) / (2 * r["total_tickets"])
+        for r in uncapped_clean if r["total_tickets"]
+    ]
+    width_q = _quartiles(uncapped_width)
+    center_q = _quartiles(uncapped_center)
     lines = [
         "# 삼쌍승식 `9999.9` 셀의 회계적 부분식별 구간",
         "",
@@ -366,8 +430,12 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
         f"({_pct(relaxed_lower, relaxed_cells)}--{_pct(relaxed_upper, relaxed_cells)})다. "
         "따라서 회계만으로 개별 셀의 무투표 여부를 실질적으로 식별하지 못한다.",
         "",
-        f"양의 하한 {lower_zeros:,}개는 같은 날 서울 두 경주에만 나타나므로 대표 "
-        "결론이 아니라 원자료 교차검증과 민감도 검사를 통과한 특이 사례로 취급한다.",
+        f"양의 하한 {lower_zeros:,}개는 총합제약이 결속된 {len(forced):,}개 사례에서만 "
+        "나온다. 표본 전체의 대표 추정치가 아니라 유지가정 아래의 사례 결과로 취급한다.",
+        "",
+        "원자료에는 2020·2021년 파티션이 없다. 2016--2019년에는 반올림 불일치가 "
+        f"있지만 2022--2025년에는 0셀이므로, 후속 실질 분석의 주표본은 "
+        "2022--2025년으로 두고 이전 시기는 강건성 표본으로 분리한다.",
         "",
         "## 정의와 계산",
         "",
@@ -408,12 +476,14 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
         f"({_pct(len(uncapped_pass), len(uncapped_clean))}) |",
         f"| 최종 매출액과 반올림상 양립하지 않는 미검열 셀 | {bad_cells:,}셀, "
         f"{len(incompatible):,}경주 |",
-        f"| 불일치 셀 완화 규칙에서 feasible `9999.9` 경주 | {len(relaxed):,}/"
-        f"{len(capped):,} ({_pct(len(relaxed), len(capped))}) |",
+        f"| 검열 경주 중 총합제약만으로 추가 기각 | "
+        f"{len(capped_clean) - len(feasible):,} |",
+        f"| 양의 무투표 하한을 만든 경주 | {len(forced):,}/{len(capped):,} |",
         "",
         "엄격 규칙은 불일치 셀이 하나라도 있으면 경주를 제외하므로 격자가 큰 경주의 "
         "탈락확률이 기계적으로 높다. 따라서 엄격 결과는 선택된 부분표본이며, 셀 단위 "
-        "완화 결과를 함께 제시한다. 격자와 매출액이 같은 마감시점의 값이라는 가정은 "
+        "완화 결과를 함께 제시한다. 완화 규칙의 100% feasible은 구성상 보장되어 "
+        "반증시험으로 해석하지 않는다. 격자와 매출액이 같은 마감시점의 값이라는 가정은 "
         "공식 메타데이터로 확인되지 않았고 아래 불일치는 그 가정까지 함께 검정한다.",
         "",
         f"무검열 경주의 실패 {len(uncapped_fail):,}건은 모두 반올림 불일치 셀을 "
@@ -424,14 +494,17 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
             for row in uncapped_fail[:5]
         ) + "다.",
         "",
-        "### 불일치 셀의 대안 규약 진단",
+        "### 표시코드 진단",
         "",
-        "| 대안 | 기준 불일치 셀 중 정수해가 생기는 셀 |",
-        "| --- | ---: |",
-        f"| floor 표시 | {sum(r['resolved_by_floor'] for r in rows):,}/{bad_cells:,} |",
-        f"| half-even 표시 | {sum(r['resolved_by_half_even'] for r in rows):,}/{bad_cells:,} |",
-        f"| 환급률 0.72, half-up | {sum(r['resolved_by_take_72'] for r in rows):,}/{bad_cells:,} |",
-        f"| 환급률 0.75, half-up | {sum(r['resolved_by_take_75'] for r in rows):,}/{bad_cells:,} |",
+        f"유효 삼쌍승 조합에서 `1.0`은 {lower_code_cells:,}셀({lower_code_races:,}경주)이다. "
+        "이를 하한코드로 재분류하지 않고 일반 표시배당으로 검사한다.",
+        "",
+        "### 자유도 0 검사의 정밀도",
+        "",
+        "| 통계 (총마권 수 대비) | 25% | 중앙값 | 75% |",
+        "| --- | ---: | ---: | ---: |",
+        f"| 허용구간 폭 `(U-L)/T` | {width_q[0]:.4%} | {width_q[1]:.4%} | {width_q[2]:.4%} |",
+        f"| 허용구간 중심과 `T`의 거리 | {center_q[0]:.4%} | {center_q[1]:.4%} | {center_q[2]:.4%} |",
         "",
         f"표시상한 사건과 더 좁은 `참배당 > 9999.9` 정의에서 셀별 상한이 달라지는 "
         f"경주는 {len(boundary_changed):,}개다. 좁은 정의의 엄격 feasible 경주는 "
@@ -445,6 +518,18 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
         lines, capped, "### 경마장별 (`1=서울, 2=제주, 3=부산경남`)", "meet"
     )
     _append_group_table(lines, capped, "### 연도별", "year")
+    lines.extend([
+        "### 시기별 주표본 분리", "",
+        "| 시기 | 검열 경주 | 엄격 통과 | 불일치 셀 |",
+        "| --- | ---: | ---: | ---: |",
+        f"| 2016--2019 | {len(pre):,} | {len(pre_feasible):,} | "
+        f"{sum(r['rounding_incompatible_cells'] for r in pre):,} |",
+        f"| 2022--2025 | {len(post):,} | {len(post_feasible):,} | "
+        f"{sum(r['rounding_incompatible_cells'] for r in post):,} |",
+        "",
+        "2020--2021년은 수집된 원자료 자체에 없고, 전후 불일치 차이는 데이터 생성·"
+        "스냅샷 절차 변화와 일치하지만 현재 자료만으로 원인을 확정할 수 없다.", "",
+    ])
     ordered = sorted(capped, key=lambda r: (r["sales_won"], r["race_id"]))
     for index, row in enumerate(ordered):
         row["sales_quintile"] = min(5, index * 5 // len(ordered) + 1)
@@ -456,8 +541,27 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
             key=lambda r: (r["min_unbet_cells"], r["capped_cells"]),
             reverse=True,
         )[:10]
+        forced_dates = sorted({races[row["race_id"]]["date"] for row in forced})
+        forced_meets = sorted({races[row["race_id"]]["meet"] for row in forced})
+        pool_labels = (
+            "단승식", "연승식", "복승식", "쌍승식", "복연승식", "삼복승식", "삼쌍승식"
+        )
+        sales_checks = []
+        no_scratches = []
+        all_arrived = []
+        for row in forced:
+            race = races[row["race_id"]]
+            sales_checks.append(
+                sum(_won(race["sales"][label]) for label in pool_labels)
+                == _won(race["sales"]["총매출액"])
+            )
+            no_scratches.append(not (race.get("scratched") or []))
+            all_arrived.append(
+                len(race.get("arrival") or [])
+                == len(race["horses"]) - len(race.get("scratched") or [])
+            )
         lines.extend([
-            "## 양의 하한이 나온 두 특이 경주",
+            f"## 양의 하한이 나온 {len(forced):,}개 사례 경주",
             "",
             "| race_id | 삼쌍승 매출 | 총매출 | 삼쌍승 비중 | C | N | 무투표 구간 |",
             "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -470,17 +574,20 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
                 f"{row['capped_cells']:,} | {row['cap_ticket_upper']:,} | "
                 f"{row['min_unbet_cells']:,}--{row['max_unbet_cells']:,} |"
             )
-        date = races[top[0]["race_id"]]["date"]
-        meet = races[top[0]["race_id"]]["meet"]
+        date = forced_dates[0]
+        meet = forced_meets[0]
         day = sorted(
             (r for r in races.values() if r["date"] == date and r["meet"] == meet),
             key=lambda r: r["race_no"],
         )
         lines.extend([
             "",
-            "두 경주의 일곱 승식 합은 `총매출액`과 원 단위까지 일치하고, 취소마가 "
-            "없으며 12두 전부 완주했다. 같은 날 삼쌍승 매출 흐름은 다음과 같다. "
-            "2--4경주의 일시적 급락 원인은 저장자료만으로 확인할 수 없다.",
+            f"파이프라인이 직접 재검사한 결과, 일곱 승식 합계 일치 "
+            f"{sum(sales_checks):,}/{len(sales_checks):,}건, 취소마 없음 "
+            f"{sum(no_scratches):,}/{len(no_scratches):,}건, 출주마 전부 착순 기록 "
+            f"{sum(all_arrived):,}/{len(all_arrived):,}건이다. "
+            "같은 날 삼쌍승 매출 흐름은 다음과 같다. 특이한 매출 변동의 제도적 "
+            "원인은 저장자료만으로 확인할 수 없다.",
             "",
             "| 경주 | 삼쌍승 매출 | 총매출 | 삼쌍승 비중 |",
             "| --- | ---: | ---: | ---: |",
@@ -493,26 +600,30 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
             )
         lines.extend([
             "",
-            "### 매출액 ±0.5%·±1% 일관 민감도",
+            "### 반올림 규약 × 환급률 민감도",
             "",
-            "각 대안 매출에서 모든 미검열 배당의 정수구간도 함께 다시 계산했다.",
+            "각 조합에서 모든 미검열 배당의 정수구간을 다시 계산했다. 불일치가 "
+            "하나라도 있으면 그 규약은 해당 경주 전체와 양립하지 않는다. `붕괴점`은 "
+            "유지규약에서 양의 하한을 0으로 만드는 데 필요한 미검열 구간 하단의 "
+            "최소 1마권 하향 교란 수다.",
             "",
-            "| race_id | 매출 변화 | 대안 매출 | 불일치 미검열 셀 | 무투표 구간 |",
-            "| --- | ---: | ---: | ---: | ---: |",
+            "| race_id | 반올림 | 환급률 | 불일치 셀 | 미검열 합 `[L,U]` | 무투표 구간 | 붕괴점 |",
+            "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
         ])
-        for item in _recompute_sales_sensitivity(
+        sensitivity_odds = _load_trifecta_odds(
             data_dir, races, [row["race_id"] for row in top]
-        ):
+        )
+        for item in _assumption_sensitivity(races, top, sensitivity_odds):
             lines.append(
-                f"| {item['race_id']} | {item['change']} | {item['sales']:,}원 | "
-                f"{item['bad']:,} | {item['min_zero']}--{item['max_zero']} |"
+                f"| {item['race_id']} | {item['rounding']} | {item['take']} | "
+                f"{item['bad']:,} | {item['ticket_min']:,}--{item['ticket_max']:,} | "
+                f"{item['min_zero']}--{item['max_zero']} | {item['breakdown']} |"
             )
         lines.extend([
             "",
-            "원래 매출에서는 불일치가 0개지만 ±0.5%만 바꾸어도 수백 개 셀이 "
-            f"표시배당과 양립하지 않는다. 따라서 {lower_zeros:,} 하한이 매출의 작은 숫자 변경만으로 "
-            "사라진다는 주장은 전체 격자를 함께 재계산하면 성립하지 않는다. 다만 급락의 "
-            "제도적 원인이 확인되지 않았으므로 두 경주 의존성은 한계로 남는다.",
+            "유지규약 이외의 조합이 다수 미검열 셀과 모순되면 그것은 하한을 없애는 "
+            "유효한 대안이 아니다. 그래도 양의 하한이 소수 사례와 수백 개 1마권 경계에 "
+            "의존한다는 사실은 그대로 한계로 남는다.",
             "",
         ])
 

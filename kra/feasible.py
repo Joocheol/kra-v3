@@ -73,6 +73,51 @@ def displayed_ticket_interval(
     return range(first, last + 1) if first <= last else range(0)
 
 
+def displayed_total_interval(
+    ticket_count: int,
+    displayed_odds: Decimal,
+    *,
+    take_fraction: Fraction = TAKE_FRACTION,
+    pool_multiplier: int = 1,
+    rounding: str = "half_up",
+) -> range:
+    """Return integer pool ticket totals displaying ``displayed_odds``.
+
+    This is the exact inverse of :func:`displayed_ticket_interval` after
+    writing sales as ``100 * total_tickets``.  It is used to test whether an
+    odds grid could have been captured at a nearby pool-total snapshot.
+    """
+    tenths = displayed_odds * 10
+    if tenths != tenths.to_integral_value():
+        raise ValueError(f"not a one-decimal dividend: {displayed_odds}")
+    d = int(tenths)
+    if ticket_count <= 0 or d <= 0 or pool_multiplier <= 0:
+        return range(0)
+
+    p, q = take_fraction.numerator, take_fraction.denominator
+    m, n = pool_multiplier, ticket_count
+    if rounding == "floor":
+        lower = Fraction(d * q * m * n, 10 * p)
+        upper = Fraction((d + 1) * q * m * n, 10 * p)
+        first = _ceil(lower)
+        last = _ceil(upper) - 1
+    elif rounding in {"half_up", "half_even"}:
+        lower = Fraction((2 * d - 1) * q * m * n, 20 * p)
+        upper = Fraction((2 * d + 1) * q * m * n, 20 * p)
+        if rounding == "half_even" and d % 2 == 0:
+            first = _ceil(lower)
+            last = upper.numerator // upper.denominator
+        elif rounding == "half_even":
+            first = lower.numerator // lower.denominator + 1
+            last = _ceil(upper) - 1
+        else:
+            first = _ceil(lower)
+            last = _ceil(upper) - 1
+    else:
+        raise ValueError(f"unknown rounding convention: {rounding!r}")
+    return range(first, last + 1) if first <= last else range(0)
+
+
 def capped_ticket_upper(
     sales_won: int,
     *,
