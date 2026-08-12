@@ -11,7 +11,7 @@ permissions:
 jobs:
   unit-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -29,3 +29,5 @@ jobs:
           git diff --exit-code --
           findings/cross_market_input_validation.md
           findings/snapshot_timing.md
+      - name: Evaluate 2025 realized outcomes
+        run: python3 analyze_outcome_evaluation.py
