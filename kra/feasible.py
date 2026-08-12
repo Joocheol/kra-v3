@@ -84,8 +84,9 @@ def displayed_total_interval(
     """Return integer pool ticket totals displaying ``displayed_odds``.
 
     This is the exact inverse of :func:`displayed_ticket_interval` after
-    writing sales as ``100 * total_tickets``.  It is used to test whether an
-    odds grid could have been captured at a nearby pool-total snapshot.
+    writing sales as ``100 * total_tickets``.  It can support a future test
+    of whether a grid was captured at a nearby pool-total snapshot; the
+    maintained analysis currently treats pre-2022 mismatches as unresolved.
     """
     tenths = displayed_odds * 10
     if tenths != tenths.to_integral_value():

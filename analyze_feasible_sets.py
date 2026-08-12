@@ -393,6 +393,7 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
     relaxed_cells = sum(r["capped_cells"] for r in relaxed)
     relaxed_lower = sum(r["relaxed_min_unbet_cells"] for r in relaxed)
     relaxed_upper = sum(r["relaxed_max_unbet_cells"] for r in relaxed)
+    excluded_capped_cells = sum(r["capped_cells"] for r in capped) - feasible_cells
     bad_cells = sum(r["rounding_incompatible_cells"] for r in rows)
     lower_code_cells = sum(r["lower_code_1_0_cells"] for r in rows)
     lower_code_races = sum(bool(r["lower_code_1_0_cells"]) for r in rows)
@@ -407,6 +408,9 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
     post = [r for r in capped if r["year"] >= "2022"]
     pre_feasible = [r for r in pre if r["strict_feasible"]]
     post_feasible = [r for r in post if r["strict_feasible"]]
+    post_cells = sum(r["capped_cells"] for r in post_feasible)
+    post_lower = sum(r["min_unbet_cells"] for r in post_feasible)
+    post_upper = sum(r["max_unbet_cells"] for r in post_feasible)
     uncapped_width = [
         (r["uncensored_ticket_max"] - r["uncensored_ticket_min"]) / r["total_tickets"]
         for r in uncapped_clean if r["total_tickets"]
@@ -418,6 +422,12 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
     ]
     width_q = _quartiles(uncapped_width)
     center_q = _quartiles(uncapped_center)
+    uncapped_clean_scratched = [
+        r for r in uncapped_clean if races[r["race_id"]].get("scratched")
+    ]
+    uncapped_clean_no_scratch = [
+        r for r in uncapped_clean if not races[r["race_id"]].get("scratched")
+    ]
     all_positive_rejected = [r for r in feasible if r["min_unbet_cells"] > 0]
     all_zero_rejected = [
         r for r in feasible
@@ -428,15 +438,23 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
         "",
         "## 결론",
         "",
-        f"회계 제약만으로 좁혀지는 핵심 결과는 한 점이 아니라 넓은 구간이다. "
+        f"실질 분석의 주표본인 2022--2025년 {len(post_feasible):,}개 검열 경주, "
+        f"{post_cells:,}개 상한 셀에서 무투표 합계의 회계적 구간은 "
+        f"**{post_lower:,}--{post_upper:,}개**다. 모든 경주의 하한이 0이므로 이 "
+        "주표본에서는 회계만으로 모든 상한 셀이 양수라는 모형을 한 번도 기각하지 못한다.",
+        "",
+        f"전기간 진단표본에서 회계 제약으로 좁혀지는 결과도 한 점이 아니라 넓은 구간이다. "
         f"엄격 규칙을 통과한 {len(feasible):,}개 검열 경주의 {feasible_cells:,}개 "
         f"`9999.9` 셀 가운데 무투표 셀 합계는 **{lower_zeros:,}--{upper_zeros:,}개**"
         f"({_pct(lower_zeros, feasible_cells)}--{_pct(upper_zeros, feasible_cells)})로만 묶인다.",
         "",
-        f"불일치 셀만 양의 미지수 `[1,T]`로 완화하면 {len(relaxed):,}개 경주의 "
+        f"불일치 셀을 정보 없는 양의 미지수 `[1,T]`로 두는 최악경계에서는 {len(relaxed):,}개 경주의 "
         f"{relaxed_cells:,}개 검열 셀에 대한 구간은 **{relaxed_lower:,}--{relaxed_upper:,}개**"
         f"({_pct(relaxed_lower, relaxed_cells)}--{_pct(relaxed_upper, relaxed_cells)})다. "
-        "따라서 회계만으로 개별 셀의 무투표 여부를 실질적으로 식별하지 못한다.",
+        "따라서 회계만으로 개별 셀의 무투표 여부를 실질적으로 식별하지 못한다. "
+        "이 완화 상한은 제외 경주의 상한 셀을 전부 추가한 기계적 경계이므로 엄격 결과와 "
+        f"동등한 강건성 추정치가 아니다: 상한 증가 {relaxed_upper-upper_zeros:,}개 = "
+        f"엄격 제외 경주의 상한 셀 {excluded_capped_cells:,}개다.",
         "",
         f"양의 하한 {lower_zeros:,}개는 총합제약이 결속된 {len(forced):,}개 사례에서만 "
         "나온다. 표본 전체의 대표 추정치가 아니라 유지가정 아래의 사례 결과로 취급한다.",
@@ -473,8 +491,8 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
         "| 검사 | 경주/셀 |",
         "| --- | ---: |",
         f"| 전체 경주 | {len(rows):,} |",
-        f"| 서로 다른 조합이 출전두수 순열과 정확히 일치 | {len(rows):,} "
-        f"({_pct(len(rows), len(rows))}) |",
+        f"| 실행 전제조건: 서로 다른 조합이 출전두수 순열과 정확히 일치 | "
+        f"{len(rows):,}/{len(rows):,} (위반 시 실행 중단) |",
         f"| `9999.9` 경주 | {len(capped):,} |",
         f"| 엄격 feasible `9999.9` 경주 | {len(feasible):,}/"
         f"{len(capped):,} ({_pct(len(feasible), len(capped))}) |",
@@ -525,6 +543,16 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
         "| --- | ---: | ---: | ---: |",
         f"| 허용구간 폭 `(U-L)/T` | {width_q[0]:.4%} | {width_q[1]:.4%} | {width_q[2]:.4%} |",
         f"| 허용구간 중심과 `T`의 거리 | {center_q[0]:.4%} | {center_q[1]:.4%} | {center_q[2]:.4%} |",
+        "",
+        "취소마 마권이 최종 승식별 매출에서 환불된 순매출이라는 가정은 무검열 "
+        "자유도 0 검사를 취소마 유무로 나눠 확인한다.",
+        "",
+        "| 무검열 청정 경주 | 통과/대상 |",
+        "| --- | ---: |",
+        f"| 취소마 없음 | {sum(r['strict_feasible'] for r in uncapped_clean_no_scratch):,}/"
+        f"{len(uncapped_clean_no_scratch):,} |",
+        f"| 취소마 있음 | {sum(r['strict_feasible'] for r in uncapped_clean_scratched):,}/"
+        f"{len(uncapped_clean_scratched):,} |",
         "",
         f"표시상한 사건과 더 좁은 `참배당 > 9999.9` 정의에서 셀별 상한이 달라지는 "
         f"경주는 {len(boundary_changed):,}개다. 좁은 정의의 엄격 feasible 경주는 "
@@ -643,7 +671,10 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
             "",
             "유지규약 이외의 조합이 다수 미검열 셀과 모순되면 그것은 하한을 없애는 "
             "유효한 대안이 아니다. 그래도 양의 하한이 소수 사례와 수백 개 1마권 경계에 "
-            "의존한다는 사실은 그대로 한계로 남는다.",
+            "의존한다는 사실은 그대로 한계로 남는다. half-even은 관측된 모든 셀에서 "
+            "half-up과 동일한 구간을 만들어 별도의 민감도 정보를 더하지 않는다. 두 경주의 "
+            "비정상적으로 낮은 삼쌍승 매출이 실제 저매출인지 스냅샷 문제인지는 외부 기록 "
+            "없이 구별되지 않으며, 이것이 182개 사례 결과의 경쟁 설명이다.",
             "",
         ])
 

@@ -73,6 +73,14 @@ def completed_trifecta(
     allocation: str = "uniform",
     beta: float = 0.0,
 ) -> dict[tuple[int, int, int], float]:
+    active = sorted(set(race["horses"]) - set(race.get("scratched") or []))
+    expected_combinations = set(itertools.permutations(active, 3))
+    if set(odds) != expected_combinations:
+        missing = len(expected_combinations - set(odds))
+        extra = len(set(odds) - expected_combinations)
+        raise ValueError(
+            f"{race['race_id']}: invalid trifecta support; missing={missing}, extra={extra}"
+        )
     sales = _won(race["sales"]["삼쌍승식"])
     total = sales // 100
     uncapped, capped = [], []
@@ -241,6 +249,39 @@ def make_report(rows: list[dict[str, object]]) -> str:
         append("2025", "residual_mid", target, "trifecta_swapped_23")
         if target != "win":
             append("2025", "residual_mid", target, "win_harville")
+    universe = {
+        str(row["race_id"]) for row in rows
+        if row["year"] == "2025" and row["scenario"] == "residual_mid"
+        and row["model"] == "trifecta_uniform"
+    }
+    availability = {
+        target: {
+            str(row["race_id"]) for row in rows
+            if row["year"] == "2025" and row["scenario"] == "residual_mid"
+            and row["model"] == "trifecta_uniform" and row["target"] == target
+        }
+        for target in TARGETS
+    }
+    common = set.intersection(*(availability[target] for target in TARGETS))
+    lines.extend([
+        "", "대상 시장 자체에 `9999.9`가 하나라도 있으면 그 시장의 정답을 구성할 수 "
+        "없어 제외한다. 2025년 전체 대상 대비 제외와 네 시장 공통표본 민감도는 다음과 같다.", "",
+        "| 대상 | 제외 경주 | 공통표본 경주 | 공통표본 균등완성 R² |",
+        "| --- | ---: | ---: | ---: |",
+    ])
+    for target in TARGETS:
+        group = [
+            row for row in rows
+            if row["year"] == "2025" and row["scenario"] == "residual_mid"
+            and row["model"] == "trifecta_uniform" and row["target"] == target
+            and str(row["race_id"]) in common
+        ]
+        sse = sum(float(row["squared_error_sum"]) for row in group)
+        tss = sum(float(row["uniform_tss"]) for row in group)
+        lines.append(
+            f"| {target} | {len(universe - availability[target]):,} | {len(group):,} | "
+            f"{1-sse/tss:.5f} |"
+        )
     lines.extend([
         "", "## 검열 잔여총량 민감도: 삼쌍승 주변화의 2025년 R²", "",
         "| 대상 | R 하한 | R 중간값 | R 상한 |", "| --- | ---: | ---: | ---: |",
@@ -265,8 +306,11 @@ def make_report(rows: list[dict[str, object]]) -> str:
         "`trifecta_position_beta_010`은 가상 상한에서 함께 지지된 비균등 대안에 대한 "
         "배분 민감도이고, `trifecta_swapped_23`은 2·3착 축을 뒤집은 반증모형이다. "
         "후자가 쌍승·복승에서 악화되는지는 축 방향의 내부 가격정보를 검사하지만 "
-        "외부 진실을 검증하지는 않는다. 경주별 수치는 "
-        "`데이터/cross_market_reconstruction.csv.gz`에 있다.", "",
+        "외부 진실을 검증하지는 않는다. 단승 행은 비순환 기준선이 없어 축 방향 "
+        "확인을 위한 기술통계일 뿐 설명력의 "
+        "독립적 우월성을 뜻하지 않는다. 대상값 검열 경주 제외는 극단값에 따른 선택이므로 "
+        "공통표본 표로 비교 가능성만 점검하며, 검열된 대상까지 일반화하지 않는다. "
+        "경주별 수치는 `데이터/cross_market_reconstruction.csv.gz`에 있다.", "",
     ])
     return "\n".join(lines)
 

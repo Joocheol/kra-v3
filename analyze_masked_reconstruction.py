@@ -381,7 +381,7 @@ def _quantiles(values: list[float]) -> tuple[float, float, float]:
     return tuple(ordered[round((len(ordered) - 1) * p)] for p in (.25, .5, .75))
 
 
-def support_summary(path: pathlib.Path) -> list[tuple[str, int, tuple[float, ...], tuple[float, ...], tuple[float, ...]]]:
+def support_summary(path: pathlib.Path) -> list[dict[str, object]]:
     with gzip.open(path, "rt", encoding="utf-8", newline="") as fh:
         source = list(csv.DictReader(fh))
     virtual = [
@@ -395,42 +395,50 @@ def support_summary(path: pathlib.Path) -> list[tuple[str, int, tuple[float, ...
         and row["strict_feasible"] == "1" and int(row["capped_cells"]) > 0
     ]
     return [
-        (
-            "가상 상한 원표본", len(virtual),
-            _quantiles([int(row["starters"]) for row in virtual]),
-            _quantiles([int(row["expected_combinations"]) for row in virtual]),
-            _quantiles([
+        {
+            "label": "가상 상한 원표본", "races": len(virtual),
+            "starters": _quantiles([int(row["starters"]) for row in virtual]),
+            "combinations": _quantiles([int(row["expected_combinations"]) for row in virtual]),
+            "whole_density": _quantiles([
                 int(row["total_tickets"]) / int(row["expected_combinations"])
                 for row in virtual
             ]),
-        ),
-        (
-            "실제 상한 대상", len(actual),
-            _quantiles([int(row["starters"]) for row in actual]),
-            _quantiles([int(row["expected_combinations"]) for row in actual]),
-            _quantiles([
+            "capped_density": None,
+        },
+        {
+            "label": "실제 상한 대상", "races": len(actual),
+            "starters": _quantiles([int(row["starters"]) for row in actual]),
+            "combinations": _quantiles([int(row["expected_combinations"]) for row in actual]),
+            "whole_density": _quantiles([
+                int(row["total_tickets"]) / int(row["expected_combinations"])
+                for row in actual
+            ]),
+            "capped_density": _quantiles([
                 ((int(row["feasible_residual_min"]) + int(row["feasible_residual_max"])) / 2)
                 / int(row["capped_cells"])
                 for row in actual
             ]),
-        ),
+        },
     ]
 
 
 def make_report(
     rows: list[dict[str, object]], n_races: int,
-    support: list[tuple[str, int, tuple[float, ...], tuple[float, ...], tuple[float, ...]]],
+    support: list[dict[str, object]],
 ) -> str:
-    experiments: dict[tuple[str, str], tuple[int, int]] = {}
+    experiments: dict[tuple[str, str], tuple[int, int, int]] = {}
     for row in rows:
         key = (str(row["race_id"]), str(row["threshold"]))
-        value = (int(row["masked_cells"]), int(row["masked_singleton_cells"]))
+        value = (
+            int(row["masked_cells"]), int(row["masked_singleton_cells"]),
+            int(row["masked_tickets"]),
+        )
         if key in experiments and experiments[key] != value:
             raise AssertionError(f"inconsistent masked experiment: {key}")
         experiments[key] = value
-    if any(masked != singleton for masked, singleton in experiments.values()):
+    if any(masked != singleton for masked, singleton, _ in experiments.values()):
         raise AssertionError("report includes non-point-identified masked cells")
-    point_identified = sum(masked for masked, _ in experiments.values())
+    point_identified = sum(masked for masked, _, _ in experiments.values())
     lines = [
         "# 가상 상한을 이용한 삼쌍승 마권배분 복원 검증", "",
         "## 설계", "",
@@ -455,20 +463,41 @@ def make_report(
         "교차엔트로피를 최소화하도록 선택하고, 아래 성능은 선택에 사용하지 않은 "
         "2025년에만 계산했다.", "",
         "## 실제 상한으로의 지원집합 이동", "",
-        "| 표본 | 경주 | 출전두수 Q1/중앙/Q3 | 전체 조합수 Q1/중앙/Q3 | 셀당 마권 Q1/중앙/Q3 |",
+        "| 표본 | 경주 | 출전두수 Q1/중앙/Q3 | 전체 조합수 Q1/중앙/Q3 | 전체 셀당 마권 T/J Q1/중앙/Q3 |",
         "| --- | ---: | ---: | ---: | ---: |",
     ]
-    for label, races, starters, combinations, density in support:
+    for item in support:
+        starters = item["starters"]
+        combinations = item["combinations"]
+        density = item["whole_density"]
         lines.append(
-            f"| {label} | {races:,} | {starters[0]:.0f}/{starters[1]:.0f}/{starters[2]:.0f} | "
+            f"| {item['label']} | {item['races']:,} | {starters[0]:.0f}/{starters[1]:.0f}/{starters[2]:.0f} | "
             f"{combinations[0]:.0f}/{combinations[1]:.0f}/{combinations[2]:.0f} | "
             f"{density[0]:.1f}/{density[1]:.1f}/{density[2]:.1f} |"
         )
     lines.extend([
-        "", "가상 상한 원표본의 셀당 마권은 전체 풀 `T/J`, 실제 상한 대상은 "
-        "검열 잔여총량 중간값 `R/C`다. 정의부터 다르지만, 실제 대상은 더 큰 격자와 "
-        "훨씬 낮은 검열셀 밀도에 놓인다. 따라서 아래 시간외 성능은 가상 상한 표본 "
-        "안의 검증이며 실제 `9999.9` 셀로의 성능 보장은 아니다.", "",
+        "", "전체 밀도와 별도로, 실제로 배분하는 숨김/상한 셀 안의 마권 밀도를 "
+        "같은 정의로 비교한다.", "",
+        "| 셀 집단 | 경주 | 셀당 잔여마권 Q1/중앙/Q3 |",
+        "| --- | ---: | ---: |",
+    ])
+    for threshold in map(str, THRESHOLDS):
+        values = [
+            tickets / masked for (race_id, value), (masked, _, tickets) in experiments.items()
+            if value == threshold
+        ]
+        q = _quantiles(values)
+        lines.append(f"| 가상 {threshold}배 이상 | {len(values):,} | {q[0]:.1f}/{q[1]:.1f}/{q[2]:.1f} |")
+    actual_density = support[1]["capped_density"]
+    lines.append(
+        f"| 실제 `9999.9` | {support[1]['races']:,} | "
+        f"{actual_density[0]:.1f}/{actual_density[1]:.1f}/{actual_density[2]:.1f} |"
+    )
+    lines.extend([
+        "", "7,000배 숨김 셀의 잔여마권 중앙값은 실제 상한 셀의 약 2배로, 이전의 "
+        "비교 불가능한 T/J 대 R/C 격차보다 작지만 동일하지 않다. 출전두수와 격자크기 "
+        "분포도 다르다. 따라서 가상 실험은 실제 대상과 부분적으로만 겹치며, "
+        "겹침 보정 없는 시간외 성능을 실제 `9999.9` 셀의 성능 보장으로 해석하지 않는다.", "",
         "## 2025년 시간외 검증 결과", "",
         "| 가상 상한 | 모형 | 선택 beta | 훈련 CE | 시험 경주 | 숨긴 셀 | MAE | log1p RMSE | 정확 일치 | 시험 CE |",
         "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",

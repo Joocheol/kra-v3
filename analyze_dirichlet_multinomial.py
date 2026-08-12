@@ -80,13 +80,17 @@ def virtual_vectors(
     out = {str(threshold): [] for threshold in THRESHOLDS}
     for race_id in sorted(grids):
         values = grids[race_id]
-        counts, _, _ = reconstruct_counts(
+        counts, lower, upper = reconstruct_counts(
             _won(races[race_id]["sales"]["삼쌍승식"]), values
         )
         odds = np.asarray([float(value) for _, value in values])
         for threshold in THRESHOLDS:
             masked = odds >= float(threshold)
             if masked.any() and not masked.all():
+                if np.any(lower[masked] != upper[masked]):
+                    raise AssertionError(
+                        f"{race_id} {threshold}: DM vector is not point identified"
+                    )
                 out[str(threshold)].append((races[race_id]["date"][:4], counts[masked]))
     return out
 

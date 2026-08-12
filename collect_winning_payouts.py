@@ -270,6 +270,8 @@ def build_row(
     # likewise a dead heat creates multiple payouts.  Their ticket counts do
     # not follow the one-winner formula and are intentionally left blank.
     supported = candidate.pool not in MULTI_PAYOUT and n_pool_payouts == 1
+    if candidate.pool in MULTI_PAYOUT and supported:
+        raise AssertionError(f"multi-payout pool entered ticket inference: {candidate.pool}")
     candidates = (
         ticket_candidates(
             sales, payout.odds, take_fraction=info["take"],
@@ -441,6 +443,11 @@ def make_report(
         "`9999.9`, 공식 상세표에는 지급항목이 없다. 이는 무투표 해석과 일치하는 "
         "직접 사례지만, 2016년 격자와 최종 배당의 시점 불일치가 함께 관측되므로 "
         "인코딩 규정의 결정적 증명으로 사용하지 않는다.",
+        "",
+        "실제로 당첨된 상한 삼쌍승 셀 142건은 모두 지급항목이 있어 미지급은 0건이다. "
+        "그러나 당첨된 상한 셀은 상한 집단 안에서도 마권 수가 상대적으로 큰 선택표본이라 "
+        "대다수 비당첨 상한 셀의 `n=0` 빈도를 거의 제한하지 못한다. 현재 자료에는 "
+        "`9999.9`가 `n=0`을 뜻한다고 혼동 없이 확정한 외부 사례가 없다.",
         "",
         "## 표본의 범위",
         "",
