@@ -209,7 +209,11 @@ def proportional_integer_allocation(total: int, scores: np.ndarray) -> tuple[np.
     result = np.floor(expected).astype(np.int64)
     remainder = total - int(result.sum())
     if remainder:
-        order = np.argsort(-(expected - result), kind="stable")
+        # libm implementations can differ below the reporting precision after
+        # fractional powers.  Quantize only the largest-remainder tie-break so
+        # the same near-tie receives the same integer ticket on every runner.
+        fractional = np.round(expected - result, decimals=10)
+        order = np.argsort(-fractional, kind="stable")
         result[order[:remainder]] += 1
     return result, probabilities
 

@@ -163,6 +163,13 @@ class ResultsTest(unittest.TestCase):
         self.assertEqual(int(got.sum()), 17)
         self.assertAlmostEqual(float(probabilities.sum()), 1.0)
 
+    def test_proportional_allocation_breaks_near_ties_by_input_order(self):
+        np = __import__("numpy")
+        got, _ = proportional_integer_allocation(
+            1, np.array([1.0, 1.0 + 1e-13])
+        )
+        self.assertEqual(got.tolist(), [1, 0])
+
     def test_auxiliary_model_rejects_censored_source_pool(self):
         np = __import__("numpy")
         with self.assertRaises(ModelUnavailable):
