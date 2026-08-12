@@ -359,7 +359,7 @@ def evaluate_race(
                     "exact_cells": int((predicted == truth).sum()),
                     "cross_entropy_sum": format(float(
                         -(truth * np.log(np.maximum(probabilities, 1e-300))).sum()
-                    ), ".12g"),
+                    ), ".10g"),
                 })
     return rows
 
