@@ -252,7 +252,8 @@ FIELDS = [
 UNMATCHED_FIELDS = ["race_id", "pool", "combination", "reason"]
 ORIENTATION_FIELDS = [
     "pool", "source_payouts", "grid_cells_found", "odds_equal",
-    "unexplained_odds_mismatches", "failures",
+    "uncensored_payouts", "uncensored_odds_equal", "censored_payouts",
+    "censored_odds_equal", "unexplained_odds_mismatches", "failures",
 ]
 
 
@@ -345,8 +346,11 @@ def audit_grid_orientation(
         expected_grid = min(
             actual.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP), DISPLAY_CAP
         )
+        segment = "censored" if expected_grid == DISPLAY_CAP else "uncensored"
+        stats[pool][f"{segment}_payouts"] += 1
         if grid == expected_grid:
             stats[pool]["equal"] += 1
+            stats[pool][f"{segment}_equal"] += 1
         else:
             stats[pool]["mismatch"] += 1
             failures.append({
@@ -363,6 +367,10 @@ def audit_grid_orientation(
             "source_payouts": count["source"],
             "grid_cells_found": count["found"],
             "odds_equal": count["equal"],
+            "uncensored_payouts": count["uncensored_payouts"],
+            "uncensored_odds_equal": count["uncensored_equal"],
+            "censored_payouts": count["censored_payouts"],
+            "censored_odds_equal": count["censored_equal"],
             "unexplained_odds_mismatches": count["mismatch"],
             "failures": count["source"] - count["found"],
         })
@@ -405,15 +413,17 @@ def make_report(
         "## 격자 방향성의 실제 자료 검증",
         "",
         "각 승식의 실제 당첨조합을 행·열·고정마 축으로 역매핑하고, 미검열 배당은 "
-        "실제 지급배당과 같고 상한 초과 배당은 `9999.9`인지 확인했다.",
+        "실제 지급배당과 같고 상한 초과 배당은 `9999.9`인지 확인했다. 상한끼리의 "
+        "일치는 축 순서를 거의 구별하지 못하므로 미검열 항목을 따로 센다.",
         "",
-        "| 승식 | 상세표 지급항목 | 격자 셀 발견 | 배당 일치 | 미해명 배당불일치 | 축 매핑 실패 |",
+        "| 승식 | 상세표 지급항목 | 미검열 일치/항목 | 상한 일치/항목 | 미해명 배당불일치 | 축 매핑 실패 |",
         "| --- | ---: | ---: | ---: | ---: | ---: |",
     ])
     for row in orientation:
         lines.append(
             f"| {row['pool']} | {row['source_payouts']:,} | "
-            f"{row['grid_cells_found']:,} | {row['odds_equal']:,} | "
+            f"{row['uncensored_odds_equal']:,}/{row['uncensored_payouts']:,} | "
+            f"{row['censored_odds_equal']:,}/{row['censored_payouts']:,} | "
             f"{row['unexplained_odds_mismatches']:,} | {row['failures']:,} |"
         )
     lines.extend([
@@ -421,6 +431,11 @@ def make_report(
         "2016-07-01 제주 8경주의 연승식 두 셀은 격자 `1.0`과 공식 지급배당 "
         "1.5·1.3이 일치하지 않는다. `1.0`을 근거 없는 하한코드로 재분류하지 않고 "
         "미해명 배당불일치로 계상했다. 조합 위치는 모두 발견되어 축 매핑 실패는 아니다.",
+        "",
+        "특히 삼쌍승은 실제 지급항목 143건 중 142건이 상한 항목이어서, 이 감사만으로 "
+        "2·3착 축의 방향을 강하게 검증하지 못한다. 페이지 표제의 `(3위 / 2위)`를 "
+        "주된 파싱 근거로 삼고, 별도 교차시장 반증모형에서 2·3착을 뒤집었을 때 "
+        "쌍승·복승 정합성이 악화되는지를 검사한다.",
         "",
         "같은 경주의 3착 3번 말은 8두 출주라 연승식 지급 자격이 있지만 격자는 "
         "`9999.9`, 공식 상세표에는 지급항목이 없다. 이는 무투표 해석과 일치하는 "

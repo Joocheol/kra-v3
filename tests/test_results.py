@@ -16,7 +16,9 @@ from kra.results import (
 from collect_winning_payouts import _could_pay, _grid_combination
 from analyze_feasible_sets import build_rows, scan_grids, write_csv_gz
 from analyze_masked_reconstruction import (
+    ModelUnavailable,
     bounded_integer_projection,
+    model_scores,
     proportional_integer_allocation,
 )
 from analyze_sparse_baseline import occupancy_moments
@@ -161,6 +163,19 @@ class ResultsTest(unittest.TestCase):
         self.assertEqual(int(got.sum()), 17)
         self.assertAlmostEqual(float(probabilities.sum()), 1.0)
 
+    def test_auxiliary_model_rejects_censored_source_pool(self):
+        np = __import__("numpy")
+        with self.assertRaises(ModelUnavailable):
+            model_scores(
+                "win_harville",
+                [(1, 2, 3), (1, 3, 2)],
+                np.array([2, 1]),
+                np.array([True, False]),
+                np.array([False, True]),
+                [1, 2, 3],
+                cross_pool={"단승식": {(1,): 2.0, (2,): 9999.9, (3,): 4.0}},
+            )
+
     def test_uniform_occupancy_moments_match_enumeration(self):
         for cells in range(1, 5):
             for tickets in range(0, 5):
@@ -189,6 +204,19 @@ class ResultsTest(unittest.TestCase):
         for target in ("win", "exacta", "quinella", "trio"):
             self.assertAlmostEqual(sum(got[target].values()), 1.0)
         self.assertAlmostEqual(got["quinella"][frozenset((1, 2))], .7)
+
+    def test_swapping_second_and_third_is_an_orientation_falsification(self):
+        table = {
+            (1, 2, 3): .4,
+            (2, 1, 3): .3,
+            (3, 2, 1): .3,
+        }
+        original = marginalize(table)
+        swapped = marginalize({(a, c, b): p for (a, b, c), p in table.items()})
+        self.assertEqual(original["win"], swapped["win"])
+        self.assertEqual(original["trio"], swapped["trio"])
+        self.assertNotEqual(original["exacta"], swapped["exacta"])
+        self.assertNotEqual(original["quinella"], swapped["quinella"])
 
     def test_cross_market_metric_rejects_mismatched_support(self):
         truth = {1: .6, 2: .4}

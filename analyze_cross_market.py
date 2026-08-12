@@ -16,7 +16,7 @@ from decimal import Decimal
 
 import numpy as np
 
-from analyze_masked_reconstruction import bounded_integer_projection, proportional_integer_allocation
+from analyze_masked_reconstruction import bounded_integer_projection
 from check_coherence import load_month, norm, spearman
 from kra.feasible import displayed_ticket_interval
 
@@ -69,6 +69,9 @@ def completed_trifecta(
     odds: dict[tuple[int, int, int], float],
     feasible: dict[str, int],
     scenario: str,
+    *,
+    allocation: str = "uniform",
+    beta: float = 0.0,
 ) -> dict[tuple[int, int, int], float]:
     sales = _won(race["sales"]["삼쌍승식"])
     total = sales // 100
@@ -90,11 +93,36 @@ def completed_trifecta(
     uncapped_counts = bounded_integer_projection(
         np.asarray(target), np.asarray(lower), np.asarray(upper), uncapped_total
     )
-    capped_counts, _ = proportional_integer_allocation(
-        residual, np.ones(len(capped), dtype=float)
-    ) if capped else (np.asarray([], dtype=np.int64), np.asarray([]))
+    scores = np.ones(len(capped), dtype=float)
+    if allocation == "position_independent":
+        if capped:
+            horses = sorted({horse for combo in odds for horse in combo})
+            horse_index = {horse: index for index, horse in enumerate(horses)}
+            marginals = [np.full(len(horses), .5) for _ in range(3)]
+            for combo, count in zip(uncapped, uncapped_counts):
+                for position, horse in enumerate(combo):
+                    marginals[position][horse_index[horse]] += float(count)
+            scores = np.asarray([
+                marginals[0][horse_index[a]]
+                * marginals[1][horse_index[b]]
+                * marginals[2][horse_index[c]]
+                for a, b, c in capped
+            ])
+    elif allocation != "uniform":
+        raise ValueError(f"unknown capped allocation: {allocation}")
+    if capped:
+        tempered = np.power(scores, beta)
+        probabilities = tempered / tempered.sum()
+        capped_counts = bounded_integer_projection(
+            residual * probabilities,
+            np.zeros(len(capped), dtype=np.int64),
+            np.full(len(capped), feasible["cap_upper"], dtype=np.int64),
+            residual,
+        )
+    else:
+        capped_counts = np.asarray([], dtype=np.int64)
     if capped_counts.size and int(capped_counts.max()) > feasible["cap_upper"]:
-        raise ValueError(f"{race['race_id']}: uniform completion exceeds cap upper")
+        raise ValueError(f"{race['race_id']}: {allocation} completion exceeds cap upper")
     counts = {
         combo: float(count) / total
         for combo, count in zip(uncapped, uncapped_counts)
@@ -179,8 +207,8 @@ def make_report(rows: list[dict[str, object]]) -> str:
         "# 삼쌍승 가격의 하위 승식 재구성", "", "## 설계", "",
         "2022--2025년 삼쌍승 배당을 100원 마권수로 복원하고 상위 1·2·3착 "
         "상태분포로 정규화했다. `9999.9` 셀의 경주별 잔여총량은 회계적 하한·"
-        "중간값·상한을 각각 사용하고, 셀 사이에는 가상 상한 검증에서 채택된 "
-        "대칭배분을 적용했다. 이를 주변화해 단승·쌍승·복승·삼복승의 실제 "
+        "중간값·상한을 각각 사용하고, 셀 사이에는 최소 대칭 기준선인 균등배분을 "
+        "적용했다. 이를 주변화해 단승·쌍승·복승·삼복승의 실제 "
         "정규화 역배당과 비교한다. 단승 Harville 순차모형을 공통 기준선으로 둔다.", "",
         "`R²`의 분모는 경주별 균등가격을 기준으로 한 편차제곱합이다. 따라서 0은 "
         "균등분포와 같고 1은 대상 시장을 정확히 재구성한다. 대상 승식 자체가 "
@@ -208,7 +236,9 @@ def make_report(rows: list[dict[str, object]]) -> str:
             f"{1-sse/tss:.5f} | {tv:.5f} | {cor:.5f} |"
         )
     for target in TARGETS:
-        append("2025", "residual_mid", target, "trifecta_marginal")
+        append("2025", "residual_mid", target, "trifecta_uniform")
+        append("2025", "residual_mid", target, "trifecta_position_beta_010")
+        append("2025", "residual_mid", target, "trifecta_swapped_23")
         if target != "win":
             append("2025", "residual_mid", target, "win_harville")
     lines.extend([
@@ -221,7 +251,7 @@ def make_report(rows: list[dict[str, object]]) -> str:
             group = [
                 row for row in rows if row["year"] == "2025"
                 and row["scenario"] == scenario and row["target"] == target
-                and row["model"] == "trifecta_marginal"
+                and row["model"] == "trifecta_uniform"
             ]
             sse = sum(float(row["squared_error_sum"]) for row in group)
             tss = sum(float(row["uniform_tss"]) for row in group)
@@ -231,8 +261,12 @@ def make_report(rows: list[dict[str, object]]) -> str:
         "", "## 해석 경계", "",
         "이 결과는 서로 다른 풀의 가격 내부 정합성을 측정한다. 실제 착순을 쓰지 "
         "않으므로 객관적 예측력·시장효율성·인과효과를 뜻하지 않는다. `R` 시나리오 "
-        "차이가 작으면 상한 셀의 미식별성이 하위 승식 주변가격에는 크게 전파되지 "
-        "않는다는 뜻이다. 경주별 수치는 `데이터/cross_market_reconstruction.csv.gz`에 있다.", "",
+        "차이가 작은 것은 균등배분을 고정한 조건부 결과다. "
+        "`trifecta_position_beta_010`은 가상 상한에서 함께 지지된 비균등 대안에 대한 "
+        "배분 민감도이고, `trifecta_swapped_23`은 2·3착 축을 뒤집은 반증모형이다. "
+        "후자가 쌍승·복승에서 악화되는지는 축 방향의 내부 가격정보를 검사하지만 "
+        "외부 진실을 검증하지는 않는다. 경주별 수치는 "
+        "`데이터/cross_market_reconstruction.csv.gz`에 있다.", "",
     ])
     return "\n".join(lines)
 
@@ -273,15 +307,37 @@ def main() -> int:
                     race, market["trifecta"], info, scenario
                 )
                 projected = marginalize(completed)
+                alternatives = []
+                if scenario == "residual_mid":
+                    position = completed_trifecta(
+                        race, market["trifecta"], info, scenario,
+                        allocation="position_independent", beta=.10,
+                    )
+                    alternatives = [
+                        ("trifecta_position_beta_010", marginalize(position)),
+                        (
+                            "trifecta_swapped_23",
+                            marginalize({
+                                (a, c, b): probability
+                                for (a, b, c), probability in completed.items()
+                            }),
+                        ),
+                    ]
                 for target in TARGETS:
                     truth = targets[target]
                     if truth is None:
                         continue
                     row = metric_row(
                         race_id, race["date"][:4], scenario, target,
-                        "trifecta_marginal", truth, projected[target]
+                        "trifecta_uniform", truth, projected[target]
                     )
                     if row: rows.append(row)
+                    for model, alternative in alternatives:
+                        row = metric_row(
+                            race_id, race["date"][:4], scenario, target,
+                            model, truth, alternative[target]
+                        )
+                        if row: rows.append(row)
                     if scenario == "residual_mid" and target != "win":
                         row = metric_row(
                             race_id, race["date"][:4], scenario, target,

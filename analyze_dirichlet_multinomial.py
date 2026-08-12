@@ -180,8 +180,9 @@ def report(summary: list[dict], actual: list[dict]) -> str:
     expected_low = sum(float(row["expected_zeros_residual_max"]) for row in actual)
     expected_mid = sum(float(row["expected_zeros_residual_mid"]) for row in actual)
     expected_high = sum(float(row["expected_zeros_residual_min"]) for row in actual)
+    zero_lower_races = sum(int(row["residual_min"]) == 0 for row in actual)
     lines = [
-        "# Dirichlet--multinomial 과산포 기준모형", "", "## 추정과 시간외 검증", "",
+        "# 선택표본의 Dirichlet--multinomial 과산포 진단", "", "## 추정과 시간외 검증", "",
         "실제 `9999.9`가 없는 경주에 3,000·5,000·7,000 가상 상한을 적용한 "
         "정확 마권수 벡터로 대칭 Dirichlet--multinomial의 셀별 농도 `alpha`를 "
         "2022--2024년에 추정하고 2025년에 평가했다. `alpha→∞`는 대칭 다항모형이다.", "",
@@ -196,9 +197,11 @@ def report(summary: list[dict], actual: list[dict]) -> str:
             f"{float(row['test_loglik_gain_per_cell']):.5f} |"
         )
     lines.extend([
-        "", "## 실제 상한 셀에 외삽", "",
+        "", "## 실제 상한 셀에 대한 기능형식 외삽 (주결과 아님)", "",
         f"실제 상한에 가장 가까운 7,000배 추정치 `alpha={alpha:.3f}`를 사용했다. "
-        "경주별 잔여총량 `R`의 회계적 식별구간은 그대로 전파했다.", "",
+        "경주별 잔여총량 `R`의 회계적 식별구간은 그대로 전파했다. 그러나 적합표본은 "
+        "엄격히 양수이고 가상 상한으로 선택된 벡터라 실제 상한 표본과 지원집합이 다르다. "
+        "아래 값은 구조적 모수가 아니라 무조건부 DM 기능형식을 적용한 민감도다.", "",
         "| 항목 | 값 |", "| --- | ---: |",
         f"| 경주 | {len(actual):,} |",
         f"| 실제 `9999.9` 셀 | {cells:,} |",
@@ -206,11 +209,12 @@ def report(summary: list[dict], actual: list[dict]) -> str:
         f"({100*expected_mid/cells:.3e}%) |",
         f"| `R` 식별구간 전파 범위 | {expected_low:,.0f}--{expected_high:,.0f} |",
         "", "## 해석", "",
-        "2025년 로그우도 개선이 양수이면 가상 상한의 양의 작은 마권수에도 다항분포보다 "
-        "과산포가 존재한다. 그러나 이 적합표본에는 실제 0이 없으므로, 실제 상한으로의 "
-        "외삽은 구조적 0을 검정하거나 식별하지 않는다. 이 결과와 대칭 다항 결과의 차이는 "
-        "분포가정 민감도이며 회계적 부분식별 구간을 대체하지 않는다. 기대값 범위의 "
-        "상단은 785개 경주에서 회계적 `R` 하한이 0인 극단 시나리오를 합산한 값이다.", "",
+        "2025년 로그우도 개선이 양수이면 가상 상한으로 선택된 양의 마권수 벡터에서 "
+        "무조건부 다항보다 DM이 더 잘 맞는다는 뜻이다. 상한 이하라는 선택사건을 "
+        "조건화한 우도가 아니므로 `alpha`를 실제 상한 셀의 구조적 이질성으로 해석할 "
+        "수 없다. 실제 상한 외삽은 구조적 0을 검정하거나 식별하지 않으며 회계적 "
+        f"부분식별 구간을 대체하지 않는다. 기대값 범위의 상단은 {zero_lower_races:,}개 "
+        "경주에서 회계적 `R` 하한이 0인 극단 시나리오를 합산한 값이다.", "",
     ])
     return "\n".join(lines)
 

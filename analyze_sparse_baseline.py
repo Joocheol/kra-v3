@@ -116,14 +116,16 @@ def make_report(rows: list[dict[str, object]]) -> str:
         float(row["expected_zeros_at_residual_mid"]) / int(row["capped_cells"])
         for row in rows
     ]
+    zero_lower_races = sum(int(row["residual_min"]) == 0 for row in rows)
     lines = [
         "# 실제 `9999.9` 셀의 대칭 희소 다항 기준모형", "",
         "## 모형과 역할", "",
         "2022--2025년 엄격 회계검사를 통과한 실제 검열 경주만 사용한다. 경주별 "
         "검열 셀 수를 `C`, 그 셀에 배분될 잔여 100원 마권 수를 `R`이라 하고, "
-        "조건부로 `R`장을 `C`개 셀에 동일확률로 다항 배분한다. 가상 상한의 "
-        "2025년 시간외 검증에서 실제 상한에 가까울수록 비균등 점수의 최적 강도가 "
-        "0으로 수축한 결과에 따른 기준모형이다.", "",
+        "조건부로 `R`장을 `C`개 셀에 동일확률로 다항 배분한다. 이는 가상 상한 "
+        "검증이 선택한 최적모형이 아니라 추가 구조를 가장 적게 두는 대칭 기준선이다. "
+        "가상 상한 표본과 실제 상한 대상의 지원집합이 달라 실제 관측자료의 조건부 "
+        "우도모형으로 해석하지 않는다.", "",
         "```text",
         "E[무투표 셀 | C,R] = C(1-1/C)^R",
         "```", "",
@@ -152,7 +154,7 @@ def make_report(rows: list[dict[str, object]]) -> str:
         "가상 상한 검증은 양의 작은 마권수의 조합 간 배분을 검증할 뿐 실제 0의 "
         "추가 발생 여부를 검정하지 못한다. 따라서 위 결과는 zero-inflated 결론이 "
         "아니라, 이후 Dirichlet--multinomial·logistic-normal·구조적 0 확장이 이겨야 "
-        "하는 사전등록된 기준선이다. `R` 하한에서 기대값 상단이 커지는 것은 785개 "
+        f"하는 사전등록된 기준선이다. `R` 하한에서 기대값 상단이 커지는 것은 {zero_lower_races:,}개 "
         "경주의 회계적 잔여총량 하한이 0이기 때문이다. 경주별 결과는 "
         "`데이터/sparse_multinomial_baseline.csv.gz`에 있다.", "",
     ]

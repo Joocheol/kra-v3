@@ -19,7 +19,6 @@ import pathlib
 import re
 import tempfile
 from collections import defaultdict
-from dataclasses import dataclass
 from decimal import Decimal
 
 import numpy as np
@@ -31,7 +30,7 @@ from collect_winning_payouts import _grid_combination
 PAGE_KEY = "3Both"
 THRESHOLDS = (Decimal("3000.0"), Decimal("5000.0"), Decimal("7000.0"))
 MODELS = (
-    "uniform", "position_independent", "sequential_prefix",
+    "uniform", "position_independent", "prefix_uniform_third",
     "win_harville", "exacta_then_third", "trio_then_order",
 )
 BETAS = (0.0, 0.05, 0.10, 0.20, 0.35, 0.50, 0.75, 1.0)
@@ -41,6 +40,10 @@ FIELDS = [
     "masked_singleton_cells", "masked_tickets", "absolute_error_sum",
     "squared_log1p_error_sum", "exact_cells", "cross_entropy_sum",
 ]
+
+
+class ModelUnavailable(ValueError):
+    """The auxiliary market required by a model is missing or censored."""
 
 
 def _won(value: object) -> int:
@@ -227,7 +230,11 @@ def model_scores(
     win = cross_pool.get("단승식", {})
     missing_win = [horse for horse in horses if (horse,) not in win]
     if model in {"win_harville", "exacta_then_third", "trio_then_order"} and missing_win:
-        raise ValueError(f"incomplete win pool for {model}: {missing_win}")
+        raise ModelUnavailable(f"incomplete win pool for {model}: {missing_win}")
+    if model in {"win_harville", "exacta_then_third", "trio_then_order"} and any(
+        value == 9999.9 for value in win.values()
+    ):
+        raise ModelUnavailable(f"censored win pool for {model}")
     raw_win = {horse: 1.0 / win.get((horse,), math.inf) for horse in horses}
     win_total = sum(raw_win.values())
     win_prob = {horse: raw_win[horse] / win_total for horse in horses}
@@ -258,7 +265,9 @@ def model_scores(
             exacta = cross_pool.get("쌍승식", {})
             i_h, j_h, k_h = combo
             if combo[:2] not in exacta:
-                raise ValueError(f"incomplete exacta pool: {combo[:2]}")
+                raise ModelUnavailable(f"incomplete exacta pool: {combo[:2]}")
+            if exacta[combo[:2]] == 9999.9:
+                raise ModelUnavailable(f"censored exacta pool: {combo[:2]}")
             scores.append(
                 (1.0 / exacta.get(combo[:2], math.inf))
                 * win_prob[k_h] / (1 - win_prob[i_h] - win_prob[j_h])
@@ -268,7 +277,9 @@ def model_scores(
             trio = cross_pool.get("삼복승식", {})
             unordered = tuple(sorted(combo))
             if unordered not in trio:
-                raise ValueError(f"incomplete trio pool: {unordered}")
+                raise ModelUnavailable(f"incomplete trio pool: {unordered}")
+            if trio[unordered] == 9999.9:
+                raise ModelUnavailable(f"censored trio pool: {unordered}")
             i_h, j_h, k_h = combo
             within = win_prob[i_h] + win_prob[j_h] + win_prob[k_h]
             order = (
@@ -280,7 +291,7 @@ def model_scores(
         i, j, k = (horse_index[x] for x in combos[index])
         if model == "position_independent":
             scores.append(m1[i] * m2[j] * m3[k])
-        elif model == "sequential_prefix":
+        elif model == "prefix_uniform_third":
             p1 = m1[i] / m1.sum()
             p2 = c12[i, j] / sum(c12[i, z] for z in range(h) if z != i)
             prefix_total = sum(c123[(i, j, z)] for z in range(h) if z not in (i, j))
@@ -306,13 +317,20 @@ def evaluate_race(
         masked = odds >= float(threshold)
         if not masked.any() or masked.all():
             continue
+        if np.any(lower[masked] != upper[masked]):
+            raise AssertionError(
+                f"{race['race_id']} {threshold}: masked truth is not point identified"
+            )
         visible = ~masked
         residual = int(counts[masked].sum())
         for model in MODELS:
-            scores = model_scores(
-                model, combos, counts, visible, masked, active,
-                cross_pool=cross_pool,
-            )
+            try:
+                scores = model_scores(
+                    model, combos, counts, visible, masked, active,
+                    cross_pool=cross_pool,
+                )
+            except ModelUnavailable:
+                continue
             truth = counts[masked]
             betas = (0.0,) if model == "uniform" else BETAS
             for beta in betas:
@@ -354,7 +372,61 @@ def write_csv_gz(path: pathlib.Path, rows: list[dict[str, object]]) -> None:
     tmp.replace(path)
 
 
-def make_report(rows: list[dict[str, object]], n_races: int) -> str:
+def _quantiles(values: list[float]) -> tuple[float, float, float]:
+    ordered = sorted(values)
+    return tuple(ordered[round((len(ordered) - 1) * p)] for p in (.25, .5, .75))
+
+
+def support_summary(path: pathlib.Path) -> list[tuple[str, int, tuple[float, ...], tuple[float, ...], tuple[float, ...]]]:
+    with gzip.open(path, "rt", encoding="utf-8", newline="") as fh:
+        source = list(csv.DictReader(fh))
+    virtual = [
+        row for row in source
+        if "2022" <= row["year"] <= "2025"
+        and row["strict_feasible"] == "1" and int(row["capped_cells"]) == 0
+    ]
+    actual = [
+        row for row in source
+        if "2022" <= row["year"] <= "2025"
+        and row["strict_feasible"] == "1" and int(row["capped_cells"]) > 0
+    ]
+    return [
+        (
+            "가상 상한 원표본", len(virtual),
+            _quantiles([int(row["starters"]) for row in virtual]),
+            _quantiles([int(row["expected_combinations"]) for row in virtual]),
+            _quantiles([
+                int(row["total_tickets"]) / int(row["expected_combinations"])
+                for row in virtual
+            ]),
+        ),
+        (
+            "실제 상한 대상", len(actual),
+            _quantiles([int(row["starters"]) for row in actual]),
+            _quantiles([int(row["expected_combinations"]) for row in actual]),
+            _quantiles([
+                ((int(row["feasible_residual_min"]) + int(row["feasible_residual_max"])) / 2)
+                / int(row["capped_cells"])
+                for row in actual
+            ]),
+        ),
+    ]
+
+
+def make_report(
+    rows: list[dict[str, object]], n_races: int,
+    support: list[tuple[str, int, tuple[float, ...], tuple[float, ...], tuple[float, ...]]],
+) -> str:
+    experiments: dict[tuple[str, str], tuple[int, int]] = {}
+    for row in rows:
+        key = (str(row["race_id"]), str(row["threshold"]))
+        value = (int(row["masked_cells"]), int(row["masked_singleton_cells"]))
+        if key in experiments and experiments[key] != value:
+            raise AssertionError(f"inconsistent masked experiment: {key}")
+        experiments[key] = value
+    if any(masked != singleton for masked, singleton in experiments.values()):
+        raise AssertionError("report includes non-point-identified masked cells")
+    point_identified = sum(masked for masked, _ in experiments.values())
     lines = [
         "# 가상 상한을 이용한 삼쌍승 마권배분 복원 검증", "",
         "## 설계", "",
@@ -363,22 +435,40 @@ def make_report(rows: list[dict[str, object]], n_races: int) -> str:
         "7,000배 이상의 셀을 가리고, 숨긴 셀 전체의 마권 수만 알려 준 조건에서 "
         "내부·외부시장 배분모형을 비교했다. 이는 상한 셀 내부의 배분 성능을 분리해 보는 "
         "검증이며 실제 상한 셀의 0 여부를 직접 검증하는 것은 아니다. 세 가상 상한의 "
-        "셀-실험을 합산한 247,584건은 모두 표시배당의 정수구간이 한 값뿐이어서 "
+        f"셀-실험을 합산한 {point_identified:,}건은 모두 표시배당의 정수구간이 한 값뿐이어서 "
         "셀별 정답이 점식별된다.", "",
         "- `uniform`: 숨긴 조합에 균등 배분",
         "- `position_independent`: 1·2·3착 말의 가시 셀 주변빈도 곱",
-        "- `sequential_prefix`: 1착 → 2착|1착 → 3착|1·2착 순차조건부 빈도", "",
+        "- `prefix_uniform_third`: 1·2착 접두 빈도와 그 접두 안에서 평활된 3착 빈도. "
+        "가려진 셀끼리는 같은 접두 안에서 균등하다.", "",
         "- `win_harville`: 단승 역배당으로 만든 Harville 순차확률",
         "- `exacta_then_third`: 쌍승 역배당 × 3착 말 단승 역배당",
         "- `trio_then_order`: 삼복승 역배당 × 세 말 집합 내부 Harville 순서확률", "",
+        "외부시장 보조모형에 필요한 단승·쌍승·삼복승 셀이 누락되거나 `9999.9`로 "
+        "검열된 경주-모형은 해당 비교에서 제외한다.", "",
         "각 비균등 점수는 `score^beta`로 완화한다. `beta=0`은 균등, `beta=1`은 "
         "원래 모형이다. 가상 상한·모형별 `beta`는 2022--2024의 마권가중 "
         "교차엔트로피를 최소화하도록 선택하고, 아래 성능은 선택에 사용하지 않은 "
         "2025년에만 계산했다.", "",
+        "## 실제 상한으로의 지원집합 이동", "",
+        "| 표본 | 경주 | 출전두수 Q1/중앙/Q3 | 전체 조합수 Q1/중앙/Q3 | 셀당 마권 Q1/중앙/Q3 |",
+        "| --- | ---: | ---: | ---: | ---: |",
+    ]
+    for label, races, starters, combinations, density in support:
+        lines.append(
+            f"| {label} | {races:,} | {starters[0]:.0f}/{starters[1]:.0f}/{starters[2]:.0f} | "
+            f"{combinations[0]:.0f}/{combinations[1]:.0f}/{combinations[2]:.0f} | "
+            f"{density[0]:.1f}/{density[1]:.1f}/{density[2]:.1f} |"
+        )
+    lines.extend([
+        "", "가상 상한 원표본의 셀당 마권은 전체 풀 `T/J`, 실제 상한 대상은 "
+        "검열 잔여총량 중간값 `R/C`다. 정의부터 다르지만, 실제 대상은 더 큰 격자와 "
+        "훨씬 낮은 검열셀 밀도에 놓인다. 따라서 아래 시간외 성능은 가상 상한 표본 "
+        "안의 검증이며 실제 `9999.9` 셀로의 성능 보장은 아니다.", "",
         "## 2025년 시간외 검증 결과", "",
         "| 가상 상한 | 모형 | 선택 beta | 훈련 CE | 시험 경주 | 숨긴 셀 | MAE | log1p RMSE | 정확 일치 | 시험 CE |",
         "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
-    ]
+    ])
     groups: dict[tuple[str, str, str], list[dict[str, object]]] = defaultdict(list)
     for row in rows:
         groups[(str(row["threshold"]), str(row["model"]), str(row["beta"]))].append(row)
@@ -414,7 +504,10 @@ def make_report(rows: list[dict[str, object]], n_races: int) -> str:
     lines.extend([
         "", "모든 모형은 숨긴 셀의 총마권 수를 정확히 보존한다. 따라서 차이는 "
         "총량 추정이 아니라 조합 간 배분에서 나온다. 셀별 상세 집계는 "
-        "`데이터/masked_reconstruction_results.csv.gz`에 있다.", "",
+        "`데이터/masked_reconstruction_results.csv.gz`에 있다. 3,000·5,000배에서는 "
+        "일부 비균등 모형이 균등보다 낫지만 7,000배의 차이는 작고 모형별 방향도 "
+        "일치하지 않는다. 실제 상한 완성에 쓰는 균등배분은 검증으로 선택된 최적모형이 "
+        "아니라 최소 대칭 기준선이다.", "",
     ])
     return "\n".join(lines)
 
@@ -444,7 +537,13 @@ def main() -> int:
             print(f"evaluate {index}/{len(wanted)}: {len(rows):,} rows", flush=True)
     write_csv_gz(args.out, rows)
     args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(make_report(rows, len(wanted)), encoding="utf-8")
+    args.report.write_text(
+        make_report(
+            rows, len(wanted),
+            support_summary(args.data / "trifecta_feasible_sets.csv.gz"),
+        ),
+        encoding="utf-8",
+    )
     print(f"wrote {args.out}: {len(rows):,} rows")
     print(f"wrote {args.report}")
     return 0

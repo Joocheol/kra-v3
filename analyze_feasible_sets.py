@@ -19,7 +19,6 @@ from kra.feasible import (
     capped_ticket_upper,
     constrained_capped_bounds,
     displayed_ticket_interval,
-    displayed_total_interval,
 )
 
 
@@ -245,14 +244,18 @@ def _quartiles(values: list[float]) -> tuple[float, float, float]:
     return pick(.25), pick(.50), pick(.75)
 
 
-def _winning_counts(path: pathlib.Path) -> tuple[int, int, int]:
+def _winning_counts(path: pathlib.Path) -> tuple[int, int, int, int]:
     if not path.exists():
-        return 0, 0, 0
+        return 0, 0, 0, 0
     with gzip.open(path, "rt", encoding="utf-8", newline="") as fh:
         rows = list(csv.DictReader(fh))
     return (
         len(rows),
-        sum(row["pool_label"] == "삼쌍승식" for row in rows),
+        sum(int(row["is_above_display_cap"]) for row in rows),
+        sum(
+            row["pool_label"] == "삼쌍승식" and int(row["is_above_display_cap"])
+            for row in rows
+        ),
         len({row["race_id"] for row in rows}),
     )
 
@@ -397,7 +400,7 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
     boundary_changed = [
         r for r in rows if r["cap_ticket_upper"] != r["cap_ticket_upper_strict_true"]
     ]
-    winning_total, winning_trifecta, winning_races = _winning_counts(
+    winning_matched, winning_above, winning_trifecta, winning_races = _winning_counts(
         data_dir / "winning_capped_payouts.csv.gz"
     )
     pre = [r for r in capped if r["year"] <= "2019"]
@@ -415,6 +418,11 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
     ]
     width_q = _quartiles(uncapped_width)
     center_q = _quartiles(uncapped_center)
+    all_positive_rejected = [r for r in feasible if r["min_unbet_cells"] > 0]
+    all_zero_rejected = [
+        r for r in feasible
+        if not (r["raw_residual_min"] <= 0 <= r["raw_residual_max"])
+    ]
     lines = [
         "# 삼쌍승식 `9999.9` 셀의 회계적 부분식별 구간",
         "",
@@ -435,16 +443,18 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
         "",
         "원자료에는 2020·2021년 파티션이 없다. 2016--2019년에는 반올림 불일치가 "
         f"있지만 2022--2025년에는 0셀이므로, 후속 실질 분석의 주표본은 "
-        "2022--2025년으로 두고 이전 시기는 강건성 표본으로 분리한다.",
+        "2022--2025년으로 둔다. 이전 시기는 불일치 원인이 해명되지 않은 역사적 "
+        "진단표본이며 강건성 증거로 사용하지 않는다.",
         "",
         "## 정의와 계산",
         "",
         "경주별 삼쌍승식 총판매 마권 수를 `T=S/100`, 미검열 셀에서 역산한 "
         "마권 수 합의 범위를 `[L,U]`, 검열 셀 수를 `C`라 했다. 각 검열 셀은 "
         "`n ∈ {0,1,...,N}`으로 두었다. 모든 유효 순서조합이 19,301경주 전부에서 "
-        "정확히 한 개의 수치 셀로 나타난다는 완전성 항등식이 `n=0`도 어떤 수치로 "
-        "표시되어야 한다는 주된 근거다. KRA 공식 인코딩 규정이 확인된 것은 아니므로 "
-        "이는 명시적 식별가정이다.",
+        "정확히 한 개의 수치 셀로 나타난다는 완전성 항등식은 별도의 결측표시가 없다는 "
+        "증거일 뿐, 그 자체로 `n=0`이 실제 존재하거나 `9999.9`로 표시된다는 것을 "
+        "구별하지 못한다. `n=0` 포함은 공식 인코딩 규정이 확인되지 않은 명시적 "
+        "식별가정이며, 아래 두 극단모형 기각 사례가 직접적인 구별 증거다.",
         "",
         "```text",
         "R_min = T - U",
@@ -479,6 +489,16 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
         f"| 검열 경주 중 총합제약만으로 추가 기각 | "
         f"{len(capped_clean) - len(feasible):,} |",
         f"| 양의 무투표 하한을 만든 경주 | {len(forced):,}/{len(capped):,} |",
+        f"| 모든 상한 셀이 양수라는 모형 기각 | {len(all_positive_rejected):,}/"
+        f"{len(feasible):,} |",
+        f"| 모든 상한 셀이 0이라는 모형 기각 | {len(all_zero_rejected):,}/"
+        f"{len(feasible):,} |",
+        "",
+        f"모든 양수 모형을 기각하는 {len(all_positive_rejected):,}개 경주 밖에서는 "
+        "회계자료가 무투표가 하나도 없는 완성표를 허용한다. 따라서 격자 완전성과 "
+        "총합만으로는 그 밖의 경주에서 `n=0` 존재 여부를 구별할 수 없다. 반대로 "
+        f"모든 0 모형은 {len(all_zero_rejected):,}개 경주에서 기각되어, 상한 셀을 "
+        "일괄적으로 무투표로 해석하는 것도 자료와 맞지 않는다.",
         "",
         "엄격 규칙은 불일치 셀이 하나라도 있으면 경주를 제외하므로 격자가 큰 경주의 "
         "탈락확률이 기계적으로 높다. 따라서 엄격 결과는 선택된 부분표본이며, 셀 단위 "
@@ -630,8 +650,9 @@ def report(rows: list[dict], races: dict[str, dict], data_dir: pathlib.Path) -> 
     lines.extend([
         "## 외부 상한 초과 지급 표본과 해석",
         "",
-        f"동결 상세 성적표 {winning_races:,}경주에서 상한 초과 지급 {winning_total:,}건을 "
-        f"확인했고, 그중 삼쌍승은 {winning_trifecta:,}건이다. 이는 실제 당첨조합만 "
+        f"동결 상세 성적표 {winning_races:,}경주에서 상한 셀과 일치한 지급항목 "
+        f"{winning_matched:,}건을 복원했고, 실제 상한 초과는 {winning_above:,}건, "
+        f"그중 삼쌍승은 {winning_trifecta:,}건이다. 이는 실제 당첨조합만 "
         "드러나는 선택표본이며 전체 검열 셀을 대표하지 않는다. 고배당에서는 반올림 "
         "구간 폭이 좁아 정수 후보가 하나인 것은 대체로 기계적 결과다.",
         "",
