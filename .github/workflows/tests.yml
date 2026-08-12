@@ -22,6 +22,10 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_outcome_evaluation.py' -v
       - name: Evaluate 2025 realized outcomes
         run: python3 analyze_outcome_evaluation.py
+      - name: Verify frozen outcome report
+        run: git diff --exit-code -- findings/outcome_evaluation.md
+      - name: Show outcome content checksum
+        run: gzip -cd 데이터/outcome_evaluation.csv.gz | sha256sum
       - name: Show outcome report
         run: cat findings/outcome_evaluation.md
 
