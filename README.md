@@ -8,9 +8,14 @@
 ## 현재까지 확인된 사실
 
 - 19,301경주, 삼쌍승식 검열 셀 3,774,486개
-- KRA 상세결과에서 실제 상한 초과 지급이 확인된 사례 142건
-- 엄격한 반올림·총합 제약이 성립하는 검열 경주 13,884개
-- 회계 제약만으로 최소 182개 무투표 셀이 확정되는 2개 경주
+- 동결한 KRA 상세 성적표 143개에서 상한 초과 지급 144건 확인
+  (삼쌍승 142건, 삼복승 2건)
+- 엄격 표본의 무투표 합계 구간: 182--1,633,769개
+  (검열 셀의 0.006%--51.636%)
+- 불일치 셀 완화 표본의 구간: 182--2,244,248개
+  (0.005%--59.458%)
+- 양의 하한 182개는 같은 날 서울 두 특이 경주에만 의존하므로 대표 결과가
+  아니라 강건성 사례로 취급
 
 자세한 결과는 다음 두 보고서에 있다.
 
@@ -22,10 +27,14 @@
 ```bash
 python3 -m unittest discover -s tests -v
 python3 analyze_feasible_sets.py
+python3 collect_winning_payouts.py --offline
 git diff --exit-code -- \
   findings/trifecta_feasible_sets.md \
-  데이터/trifecta_feasible_sets.csv.gz
+  findings/winning_capped_payouts.md \
+  데이터/winning_payout_html.sha256
 ```
+
+CI에서는 모든 압축 CSV를 풀어 커밋 산출물과 내용 단위로도 비교한다.
 
 분석 원칙과 후속 모형의 정보 분리는 `RESEARCH_PROTOCOL.md`를 따른다.
 

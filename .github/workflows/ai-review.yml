@@ -103,15 +103,38 @@ jobs:
         run: |
           mkdir -p .ai-review-input
           git diff --check "$BASE_SHA...HEAD"
+          cp 데이터/trifecta_feasible_sets.csv.gz /tmp/trifecta-committed.csv.gz
+          cp 데이터/winning_capped_payouts.csv.gz /tmp/winning-committed.csv.gz
+          cp 데이터/winning_payout_unmatched.csv.gz /tmp/unmatched-committed.csv.gz
+          cp 데이터/grid_orientation_audit.csv.gz /tmp/orientation-committed.csv.gz
           python3 -m unittest discover -s tests -v 2>&1 | tee .ai-review-input/tests.txt
           python3 analyze_feasible_sets.py 2>&1 | tee .ai-review-input/reproduction.txt
-          git diff --exit-code -- findings/trifecta_feasible_sets.md 데이터/trifecta_feasible_sets.csv.gz
+          cmp <(gzip -cd /tmp/trifecta-committed.csv.gz) \
+            <(gzip -cd 데이터/trifecta_feasible_sets.csv.gz)
+          git diff --exit-code -- findings/trifecta_feasible_sets.md
+          python3 collect_winning_payouts.py --offline 2>&1 | \
+            tee .ai-review-input/winning-reproduction.txt
+          cmp <(gzip -cd /tmp/winning-committed.csv.gz) \
+            <(gzip -cd 데이터/winning_capped_payouts.csv.gz)
+          cmp <(gzip -cd /tmp/unmatched-committed.csv.gz) \
+            <(gzip -cd 데이터/winning_payout_unmatched.csv.gz)
+          cmp <(gzip -cd /tmp/orientation-committed.csv.gz) \
+            <(gzip -cd 데이터/grid_orientation_audit.csv.gz)
+          git diff --exit-code -- findings/winning_capped_payouts.md \
+            데이터/winning_payout_html.sha256
           sha256sum 데이터/races.jsonl.gz 데이터/trifecta_feasible_sets.csv.gz \
             데이터/winning_capped_payouts.csv.gz > .ai-review-input/checksums.txt
+          find 데이터/cells -type f -name '*.csv.gz' -print0 | sort -z | \
+            xargs -0 sha256sum > .ai-review-input/cell-checksums.txt
           git diff --no-ext-diff --no-textconv --unified=80 \
             "$BASE_SHA...HEAD" > .ai-review-input/pr.diff
           cp findings/trifecta_feasible_sets.md .ai-review-input/
           cp findings/winning_capped_payouts.md .ai-review-input/
+          gzip -cd 데이터/grid_orientation_audit.csv.gz > \
+            .ai-review-input/grid_orientation_audit.csv
+          gzip -cd 데이터/winning_payout_unmatched.csv.gz > \
+            .ai-review-input/winning_payout_unmatched.csv
+          cp 데이터/winning_payout_html.sha256 .ai-review-input/
           python3 - <<'PY' > .ai-review-input/output-sample.csv
           import gzip
           from itertools import islice
@@ -165,7 +188,9 @@ jobs:
             #${{ github.event.pull_request.number }}. Read CLAUDE.md,
             RESEARCH_PROTOCOL.md, .ai-review-input/pr.diff, tests.txt,
             reproduction.txt, checksums.txt, output-sample.csv, and both copied
-            findings reports. Inspect every changed source plus necessary surrounding
+            findings reports. Also read winning-reproduction.txt,
+            cell-checksums.txt, winning_payout_html.sha256, and the decompressed
+            orientation and unmatched CSV files when needed. Inspect every changed source plus necessary surrounding
             code. Seek falsification, not reassurance. Audit the n=0 versus n>0
             interpretation of 9999.9, exact integer/rounding algebra, takeout and
             ticket units, structural grid markers, scratches, combination completeness,

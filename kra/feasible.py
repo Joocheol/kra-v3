@@ -27,28 +27,49 @@ def displayed_ticket_interval(
     *,
     take_fraction: Fraction = TAKE_FRACTION,
     ticket_won: int = TICKET_WON,
+    pool_multiplier: int = 1,
+    rounding: str = "half_up",
 ) -> range:
     """Return positive integer ticket counts rounding to ``displayed_odds``.
 
-    KRA prints one decimal place.  The calculation uses the half-up interval
-    ``d - 0.5 <= 10*O < d + 0.5``.  An empty range records an incompatibility
-    between the final pool total and the archived grid value; callers must not
-    silently repair it.
+    KRA prints one decimal place.  The maintained convention is positive
+    half-up, ``d - 0.5 <= 10*O < d + 0.5``.  ``half_even`` and ``floor`` are
+    exposed only for falsification diagnostics.  ``pool_multiplier`` divides
+    the payout resource (quinella-place has multiplier three).  An empty range
+    records an incompatibility; callers must not silently repair it.
     """
     tenths = displayed_odds * 10
     if tenths != tenths.to_integral_value():
         raise ValueError(f"not a one-decimal dividend: {displayed_odds}")
     d = int(tenths)
-    if sales_won <= 0 or d <= 0 or ticket_won <= 0:
+    if sales_won <= 0 or d <= 0 or ticket_won <= 0 or pool_multiplier <= 0:
         return range(0)
 
     # 10*O = A/(B*n).
     a = 10 * take_fraction.numerator * sales_won
-    b = take_fraction.denominator * ticket_won
-    lower = Fraction(2 * a, b * (2 * d + 1))
-    upper = Fraction(2 * a, b * (2 * d - 1))
-    first = lower.numerator // lower.denominator + 1
-    last = upper.numerator // upper.denominator
+    b = take_fraction.denominator * ticket_won * pool_multiplier
+    if rounding == "floor":
+        # d <= 10*O < d+1.
+        lower = Fraction(a, b * (d + 1))
+        upper = Fraction(a, b * d)
+        first = lower.numerator // lower.denominator + 1
+        last = upper.numerator // upper.denominator
+    elif rounding in {"half_up", "half_even"}:
+        lower = Fraction(2 * a, b * (2 * d + 1))
+        upper = Fraction(2 * a, b * (2 * d - 1))
+        if rounding == "half_even" and d % 2 == 0:
+            # An even displayed digit owns both exact half-way boundaries.
+            first = _ceil(lower)
+            last = upper.numerator // upper.denominator
+        elif rounding == "half_even":
+            # An odd displayed digit owns neither exact half-way boundary.
+            first = lower.numerator // lower.denominator + 1
+            last = _ceil(upper) - 1
+        else:
+            first = lower.numerator // lower.denominator + 1
+            last = upper.numerator // upper.denominator
+    else:
+        raise ValueError(f"unknown rounding convention: {rounding!r}")
     return range(first, last + 1) if first <= last else range(0)
 
 
@@ -58,17 +79,27 @@ def capped_ticket_upper(
     cap: Decimal = DISPLAY_CAP,
     take_fraction: Fraction = TAKE_FRACTION,
     ticket_won: int = TICKET_WON,
+    pool_multiplier: int = 1,
+    definition: str = "display_event",
 ) -> int:
-    """Largest positive ticket count whose true dividend exceeds ``cap``.
+    """Largest positive ticket count consistent with a capped display cell.
 
-    Zero is not included in the return value but is always a separate possible
-    state for a capped grid cell.  Thus a capped cell has candidates
-    ``{0, 1, ..., capped_ticket_upper(...)}``.
+    The default observation is the *display event*: under positive half-up,
+    every true dividend at least ``cap - 0.05`` displays as the capped value.
+    ``strict_true`` retains the narrower ``true dividend > cap`` definition as
+    a sensitivity check.  Zero is always a separate possible state, so the
+    full candidate set is ``{0, 1, ..., capped_ticket_upper(...)}``.
     """
-    if sales_won <= 0 or cap <= 0 or ticket_won <= 0:
-        raise ValueError("sales, cap, and ticket size must be positive")
-    k = take_fraction * sales_won / ticket_won
-    return _ceil(k / Fraction(cap)) - 1
+    if sales_won <= 0 or cap <= 0 or ticket_won <= 0 or pool_multiplier <= 0:
+        raise ValueError("sales, cap, ticket size, and multiplier must be positive")
+    k = take_fraction * sales_won / (ticket_won * pool_multiplier)
+    if definition == "display_event":
+        threshold = Fraction(cap - Decimal("0.05"))
+        value = k / threshold
+        return value.numerator // value.denominator
+    if definition == "strict_true":
+        return _ceil(k / Fraction(cap)) - 1
+    raise ValueError(f"unknown cap definition: {definition!r}")
 
 
 @dataclass(frozen=True)

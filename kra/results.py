@@ -116,6 +116,7 @@ def ticket_candidates(
     *,
     take_fraction: Fraction = Fraction(73, 100),
     ticket_won: int = 100,
+    pool_multiplier: int = 1,
 ) -> range:
     """Integer 100-won ticket counts consistent with a one-decimal payout.
 
@@ -128,12 +129,12 @@ def ticket_candidates(
     if tenths != tenths.to_integral_value():
         raise ValueError(f"payout is not displayed to one decimal: {displayed_odds}")
     d = int(tenths)
-    if sales_won <= 0 or d <= 0 or ticket_won <= 0:
+    if sales_won <= 0 or d <= 0 or ticket_won <= 0 or pool_multiplier <= 0:
         return range(0)
 
     # 10*O = A/(B*n).
     a = 10 * take_fraction.numerator * sales_won
-    b = take_fraction.denominator * ticket_won
+    b = take_fraction.denominator * ticket_won * pool_multiplier
 
     # d - 1/2 <= A/(B*n) < d + 1/2
     # therefore 2A/[B(2d+1)] < n <= 2A/[B(2d-1)].

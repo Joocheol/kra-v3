@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import csv
 import gzip
+import hashlib
 import io
 import json
 import pathlib
@@ -38,13 +39,15 @@ from kra.results import (
 USER_AGENT = "kra-v3-research/1.0 (academic reproducibility; one page per race)"
 
 POOL = {
-    "단승식": {"key": "win", "page": "Scm", "take": Fraction(80, 100)},
-    "연승식": {"key": "place", "page": "Scm", "take": Fraction(80, 100)},
-    "복승식": {"key": "quinella", "page": "Scm", "take": Fraction(73, 100)},
-    "쌍승식": {"key": "exacta", "page": "Both", "take": Fraction(73, 100)},
-    "복연승식": {"key": "quinella_place", "page": "Bc", "take": Fraction(73, 100)},
-    "삼복승식": {"key": "trio", "page": "3Bc", "take": Fraction(73, 100)},
-    "삼쌍승식": {"key": "trifecta", "page": "3Both", "take": Fraction(73, 100)},
+    "단승식": {"key": "win", "page": "Scm", "take": Fraction(80, 100), "m": 1},
+    "연승식": {"key": "place", "page": "Scm", "take": Fraction(80, 100), "m": 1},
+    "복승식": {"key": "quinella", "page": "Scm", "take": Fraction(73, 100), "m": 1},
+    "쌍승식": {"key": "exacta", "page": "Both", "take": Fraction(73, 100), "m": 1},
+    # One quinella-place purchase creates three winning-pair claims; its
+    # accounting multiplier is therefore three, not one.
+    "복연승식": {"key": "quinella_place", "page": "Bc", "take": Fraction(73, 100), "m": 3},
+    "삼복승식": {"key": "trio", "page": "3Bc", "take": Fraction(73, 100), "m": 1},
+    "삼쌍승식": {"key": "trifecta", "page": "3Both", "take": Fraction(73, 100), "m": 1},
 }
 UNORDERED = {"복승식", "복연승식", "삼복승식"}
 MULTI_PAYOUT = {"연승식", "복연승식"}
@@ -68,6 +71,22 @@ def load_races(path: pathlib.Path) -> dict[str, dict]:
 
 def _canonical(pool: str, combination: tuple[int, ...]) -> tuple[int, ...]:
     return tuple(sorted(combination)) if pool in UNORDERED else combination
+
+
+def load_frozen_payouts(
+    cache_dir: pathlib.Path,
+) -> dict[tuple[str, str, tuple[int, ...]], Decimal]:
+    expected: dict[tuple[str, str, tuple[int, ...]], Decimal] = {}
+    for path in sorted(cache_dir.glob("*.html")):
+        race_id = path.stem
+        for payout in parse_winning_dividends(_decode_html(path.read_bytes())):
+            key = (race_id, payout.pool, _canonical(payout.pool, payout.combination))
+            if key in expected and expected[key] != payout.odds:
+                raise ValueError(f"duplicate payout with different odds: {key}")
+            expected[key] = payout.odds
+    if not expected:
+        raise ValueError(f"no frozen detail pages in {cache_dir}")
+    return expected
 
 
 def _grid_combination(row: dict[str, str]) -> tuple[str, tuple[int, ...]] | None:
@@ -97,8 +116,13 @@ def _grid_combination(row: dict[str, str]) -> tuple[str, tuple[int, ...]] | None
     return None
 
 
-def _could_pay(pool: str, combination: tuple[int, ...], arrival: list[int]) -> bool:
-    if len(arrival) < 3:
+def _could_pay(
+    pool: str,
+    combination: tuple[int, ...],
+    arrival: list[int],
+    starters: int | None = None,
+) -> bool:
+    if not arrival:
         return False
     if pool == "단승식":
         return combination == (arrival[0],)
@@ -107,8 +131,10 @@ def _could_pay(pool: str, combination: tuple[int, ...], arrival: list[int]) -> b
         # three otherwise.  This is only an eligibility filter: the detailed
         # result table is still authoritative because an eligible placing can
         # have no paid dividend when no winning ticket was sold.
-        n_paid = 3 if len(arrival) >= 8 else 2
+        n_paid = 3 if (starters if starters is not None else len(arrival)) >= 8 else 2
         return combination[0] in arrival[:n_paid]
+    if len(arrival) < 3:
+        return False
     if pool == "복승식":
         return combination == tuple(sorted(arrival[:2]))
     if pool == "쌍승식":
@@ -122,8 +148,15 @@ def _could_pay(pool: str, combination: tuple[int, ...], arrival: list[int]) -> b
     return False
 
 
-def capped_candidates(data: pathlib.Path, races: dict[str, dict]) -> list[CappedCandidate]:
+def capped_candidates(
+    data: pathlib.Path,
+    races: dict[str, dict],
+    *,
+    orientation_expected: dict[tuple[str, str, tuple[int, ...]], Decimal] | None = None,
+    orientation_found: dict[tuple[str, str, tuple[int, ...]], Decimal] | None = None,
+) -> list[CappedCandidate]:
     found: set[CappedCandidate] = set()
+    wanted_races = {key[0] for key in orientation_expected or {}}
     for page in ("Scm", "Both", "Bc", "3Bc", "3Both"):
         partitions = sorted((data / "cells" / f"page_key={page}").glob("*.csv.gz"))
         if not partitions:
@@ -132,14 +165,29 @@ def capped_candidates(data: pathlib.Path, races: dict[str, dict]) -> list[Capped
         for path in partitions:
             with gzip.open(path, "rt", encoding="utf-8", newline="") as fh:
                 for row in csv.DictReader(fh):
-                    if row["section"] != "body" or row["cell_raw"] != str(DISPLAY_CAP):
+                    if row["section"] != "body" or row["spanned"] != "0":
                         continue
                     parsed = _grid_combination(row)
                     race = races.get(row["race_id"])
                     if parsed is None or race is None:
                         continue
                     pool, combo = parsed
-                    if _could_pay(pool, combo, race.get("arrival") or []):
+                    key = (row["race_id"], pool, _canonical(pool, combo))
+                    if (
+                        orientation_expected is not None
+                        and orientation_found is not None
+                        and row["race_id"] in wanted_races
+                        and key in orientation_expected
+                        and row["cell_raw"].replace(".", "", 1).isdigit()
+                    ):
+                        value = Decimal(row["cell_raw"])
+                        if key in orientation_found and orientation_found[key] != value:
+                            raise ValueError(f"grid mapping is not unique: {key}")
+                        orientation_found[key] = value
+                    if row["cell_raw"] != str(DISPLAY_CAP):
+                        continue
+                    starters = len(race["horses"]) - len(race.get("scratched") or [])
+                    if _could_pay(pool, combo, race.get("arrival") or [], starters):
                         found.add(CappedCandidate(row["race_id"], pool, combo))
     return sorted(found)
 
@@ -160,10 +208,13 @@ def fetch_html(
     timeout: float,
     retries: int,
     refresh: bool,
+    offline: bool,
 ) -> tuple[str, bool]:
     cached = cache_dir / f"{race_id}.html"
     if cached.exists() and not refresh:
         return _decode_html(cached.read_bytes()), False
+    if offline:
+        raise FileNotFoundError(f"offline source is missing: {cached}")
     request = urllib.request.Request(detail_url(race_id), headers={"User-Agent": USER_AGENT})
     last_error = None
     for attempt in range(retries + 1):
@@ -194,8 +245,14 @@ FIELDS = [
     "race_id", "race_date", "meet", "race_no", "pool", "pool_label",
     "first_no", "second_no", "third_no", "grid_odds", "actual_odds",
     "is_above_display_cap", "sales_won", "payout_fraction",
-    "ticket_inference_supported", "ticket_count_min", "ticket_count_max",
+    "pool_multiplier", "ticket_inference_supported", "ticket_inference_status",
+    "ticket_count_min", "ticket_count_max",
     "ticket_count_candidates", "ticket_count", "source_url",
+]
+UNMATCHED_FIELDS = ["race_id", "pool", "combination", "reason"]
+ORIENTATION_FIELDS = [
+    "pool", "source_payouts", "grid_cells_found", "odds_equal",
+    "lower_code_1_0", "failures",
 ]
 
 
@@ -213,10 +270,18 @@ def build_row(
     # not follow the one-winner formula and are intentionally left blank.
     supported = candidate.pool not in MULTI_PAYOUT and n_pool_payouts == 1
     candidates = (
-        ticket_candidates(sales, payout.odds, take_fraction=info["take"])
+        ticket_candidates(
+            sales, payout.odds, take_fraction=info["take"],
+            pool_multiplier=info["m"],
+        )
         if supported
         else range(0)
     )
+    if supported and not candidates:
+        raise ValueError(
+            f"{candidate.race_id} {candidate.pool} {candidate.combination}: "
+            "paid dividend has no accounting-consistent integer ticket count"
+        )
     combo = list(candidate.combination) + [""] * (3 - len(candidate.combination))
     return {
         "race_id": candidate.race_id,
@@ -233,7 +298,9 @@ def build_row(
         "is_above_display_cap": int(payout.odds > DISPLAY_CAP),
         "sales_won": sales,
         "payout_fraction": str(Decimal(info["take"].numerator) / info["take"].denominator),
+        "pool_multiplier": info["m"],
         "ticket_inference_supported": int(supported),
+        "ticket_inference_status": "identified" if supported else "unsupported_multi_payout",
         "ticket_count_min": candidates.start if len(candidates) else "",
         "ticket_count_max": candidates.stop - 1 if len(candidates) else "",
         "ticket_count_candidates": len(candidates) if supported else "",
@@ -243,15 +310,138 @@ def build_row(
 
 
 def write_csv_gz(path: pathlib.Path, rows: list[dict[str, object]]) -> None:
+    write_dicts_gz(path, rows, FIELDS)
+
+
+def write_dicts_gz(
+    path: pathlib.Path,
+    rows: list[dict[str, object]],
+    fields: list[str],
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as raw:
         tmp = pathlib.Path(raw.name)
         with gzip.GzipFile(fileobj=raw, mode="wb", filename="", mtime=0) as zipped:
             with io.TextIOWrapper(zipped, encoding="utf-8", newline="") as text:
-                writer = csv.DictWriter(text, fieldnames=FIELDS, lineterminator="\n")
+                writer = csv.DictWriter(text, fieldnames=fields, lineterminator="\n")
                 writer.writeheader()
                 writer.writerows(rows)
     tmp.replace(path)
+
+
+def audit_grid_orientation(
+    expected: dict[tuple[str, str, tuple[int, ...]], Decimal],
+    found: dict[tuple[str, str, tuple[int, ...]], Decimal],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Verify every grid-axis mapping against frozen real winning payouts."""
+    failures = []
+    stats = defaultdict(Counter)
+    for key, actual in sorted(expected.items()):
+        race_id, pool, combo = key
+        stats[pool]["source"] += 1
+        grid = found.get(key)
+        if grid is not None:
+            stats[pool]["found"] += 1
+        expected_grid = min(actual, DISPLAY_CAP)
+        if grid == expected_grid:
+            stats[pool]["equal"] += 1
+        elif grid == Decimal("1.0") and actual > Decimal("1.0"):
+            # The archive also uses 1.0 as a lower display code.  Preserve it
+            # as a distinct non-exact match rather than calling the axes wrong.
+            stats[pool]["lower_code"] += 1
+        else:
+            failures.append({
+                "race_id": race_id,
+                "pool": pool,
+                "combination": "-".join(map(str, combo)),
+                "reason": f"source={actual}; grid={grid}",
+            })
+    rows = []
+    for pool in POOL:
+        count = stats[pool]
+        rows.append({
+            "pool": pool,
+            "source_payouts": count["source"],
+            "grid_cells_found": count["found"],
+            "odds_equal": count["equal"],
+            "lower_code_1_0": count["lower_code"],
+            "failures": count["source"] - count["equal"] - count["lower_code"],
+        })
+    return rows, failures
+
+
+def make_report(
+    rows: list[dict[str, object]],
+    unmatched: list[dict[str, object]],
+    orientation: list[dict[str, object]],
+    source_pages: int,
+) -> str:
+    by_pool = Counter(str(row["pool_label"]) for row in rows)
+    above = [row for row in rows if int(row["is_above_display_cap"])]
+    inferred = [row for row in rows if row["ticket_inference_status"] == "identified"]
+    lines = [
+        "# KRA 상세 성적표에서 복원한 상한 초과 지급배당",
+        "",
+        "## 재현 결과",
+        "",
+        f"동결한 실제 KRA 상세 성적표 {source_pages:,}개를 오프라인으로 읽어 "
+        f"배당판 `9999.9` 셀과 일치하는 지급배당 {len(rows):,}건을 복원했다. "
+        f"실제 지급배당이 9999.9를 초과한 것은 {len(above):,}건이다.",
+        "",
+        "| 승식 | 복원 건수 |",
+        "| --- | ---: |",
+    ]
+    for pool in POOL:
+        lines.append(f"| {pool} | {by_pool[pool]:,} |")
+    lines.extend([
+        "",
+        "요청한 상세 페이지 수와 지급배당 건수는 다른 통계다. 한 상세 페이지에서 "
+        "삼복승과 삼쌍승의 상한 초과 지급이 함께 복원될 수 있다. 고배당에서는 "
+        "반올림 구간 폭이 좁으므로 점식별은 대체로 기계적이며, 복원 모형의 성과가 아니다.",
+        "",
+        f"정수 마권 수 추론을 지원하는 {len(inferred):,}건은 모두 양립하는 후보가 "
+        "존재한다. 지원되는 행에서 후보가 0개이면 스크립트가 즉시 실패한다. "
+        f"상세표에 지급항목이 없던 잠재 셀 {len(unmatched):,}건은 별도 산출물에 남겼다.",
+        "",
+        "## 격자 방향성의 실제 자료 검증",
+        "",
+        "각 승식의 실제 당첨조합을 행·열·고정마 축으로 역매핑하고, 미검열 배당은 "
+        "실제 지급배당과 같고 상한 초과 배당은 `9999.9`인지 확인했다.",
+        "",
+        "| 승식 | 상세표 지급항목 | 격자 셀 발견 | 배당 일치 | 하한코드 1.0 | 실패 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
+    ])
+    for row in orientation:
+        lines.append(
+            f"| {row['pool']} | {row['source_payouts']:,} | "
+            f"{row['grid_cells_found']:,} | {row['odds_equal']:,} | "
+            f"{row['lower_code_1_0']:,} | {row['failures']:,} |"
+        )
+    lines.extend([
+        "",
+        "## 표본의 범위",
+        "",
+        "이 표본은 실제 착순을 이용해 요청 대상을 좁힌 검증표본이므로 전체 검열 셀을 "
+        "대표하지 않는다. 출주두수는 완주두수가 아니라 취소마를 제외한 출주두수로 "
+        "판정한다. 저장된 선형 착순만으로 발견할 수 없는 공동착 경주가 있을 수 있어 "
+        "복원 건수는 전수 상한이 아니라 확인된 하한으로 해석한다.",
+        "",
+        "원천 HTML, 원천 해시, 미매칭 목록, 방향성 감사표와 최종 CSV를 모두 저장해 "
+        "네트워크 없이 재생성할 수 있다.",
+        "",
+    ])
+    return "\n".join(lines)
+
+
+def write_source_manifest(cache_dir: pathlib.Path, path: pathlib.Path) -> None:
+    lines = []
+    for source in sorted(cache_dir.glob("*.html")):
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        lines.append(f"{digest}  {cache_dir.name}/{source.name}")
+    if not lines:
+        raise ValueError(f"no HTML sources in {cache_dir}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -263,7 +453,23 @@ def main() -> int:
     )
     parser.add_argument(
         "--cache-dir", type=pathlib.Path,
-        default=pathlib.Path("outputs/winning_payout_html"),
+        default=pathlib.Path("데이터/winning_payout_html"),
+    )
+    parser.add_argument(
+        "--unmatched-out", type=pathlib.Path,
+        default=pathlib.Path("데이터/winning_payout_unmatched.csv.gz"),
+    )
+    parser.add_argument(
+        "--orientation-out", type=pathlib.Path,
+        default=pathlib.Path("데이터/grid_orientation_audit.csv.gz"),
+    )
+    parser.add_argument(
+        "--report", type=pathlib.Path,
+        default=pathlib.Path("findings/winning_capped_payouts.md"),
+    )
+    parser.add_argument(
+        "--source-manifest", type=pathlib.Path,
+        default=pathlib.Path("데이터/winning_payout_html.sha256"),
     )
     parser.add_argument("--race-id", action="append", default=[])
     parser.add_argument("--limit-races", type=int, default=0)
@@ -271,13 +477,23 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.add_argument("--retries", type=int, default=4)
     parser.add_argument("--refresh", action="store_true")
+    parser.add_argument(
+        "--offline", action="store_true",
+        help="require every detailed result page to exist in --cache-dir",
+    )
     args = parser.parse_args()
 
     races_path = args.data / "races.jsonl.gz"
     if not races_path.exists():
         sys.exit(f"missing {races_path}")
     races = load_races(races_path)
-    candidates = capped_candidates(args.data, races)
+    orientation_expected = load_frozen_payouts(args.cache_dir)
+    orientation_found: dict[tuple[str, str, tuple[int, ...]], Decimal] = {}
+    candidates = capped_candidates(
+        args.data, races,
+        orientation_expected=orientation_expected,
+        orientation_found=orientation_found,
+    )
     print("potential capped payouts:", dict(Counter(x.pool for x in candidates)), file=sys.stderr)
 
     by_race: dict[str, list[CappedCandidate]] = defaultdict(list)
@@ -302,6 +518,7 @@ def main() -> int:
             html, used_network = fetch_html(
                 race_id, args.cache_dir, timeout=args.timeout,
                 retries=args.retries, refresh=args.refresh,
+                offline=args.offline,
             )
             payouts = parse_winning_dividends(html)
             payout_counts = Counter(p.pool for p in payouts)
@@ -334,8 +551,37 @@ def main() -> int:
         sys.exit(f"refusing partial output: {len(problems)} detail page(s) failed")
 
     rows.sort(key=lambda row: (str(row["race_id"]), str(row["pool"])))
+    unmatched_rows = [
+        {
+            "race_id": item.race_id,
+            "pool": item.pool,
+            "combination": "-".join(map(str, item.combination)),
+            "reason": "eligible capped grid cell absent from detailed paid-dividend table",
+        }
+        for item in sorted(unmatched)
+    ]
+    orientation, orientation_failures = audit_grid_orientation(
+        orientation_expected, orientation_found
+    )
+    if orientation_failures:
+        for failure in orientation_failures[:20]:
+            print("orientation failure:", failure, file=sys.stderr)
+        sys.exit(f"refusing output: {len(orientation_failures)} grid orientation failures")
     write_csv_gz(args.out, rows)
+    write_dicts_gz(args.unmatched_out, unmatched_rows, UNMATCHED_FIELDS)
+    write_dicts_gz(args.orientation_out, orientation, ORIENTATION_FIELDS)
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    source_pages = len(list(args.cache_dir.glob("*.html")))
+    args.report.write_text(
+        make_report(rows, unmatched_rows, orientation, source_pages),
+        encoding="utf-8",
+    )
+    write_source_manifest(args.cache_dir, args.source_manifest)
     print(f"wrote {args.out}: {len(rows):,} rows", file=sys.stderr)
+    print(f"wrote {args.unmatched_out}: {len(unmatched_rows):,} rows", file=sys.stderr)
+    print(f"wrote {args.orientation_out}: {len(orientation):,} pools", file=sys.stderr)
+    print(f"wrote {args.report}", file=sys.stderr)
+    print(f"wrote {args.source_manifest}", file=sys.stderr)
     print("recovered by pool:", dict(Counter(row["pool_label"] for row in rows)))
     print("actual > 9999.9:", sum(int(row["is_above_display_cap"]) for row in rows))
     print("unmatched potential cells:", len(unmatched))
