@@ -152,10 +152,14 @@ def metric_row(
         "target": target,
         "model": model,
         "cells": len(keys),
-        "squared_error_sum": sum((a - b) ** 2 for a, b in zip(y, pred)),
-        "uniform_tss": sum((a - uniform) ** 2 for a in y),
-        "total_variation": .5 * sum(abs(a - b) for a, b in zip(y, pred)),
-        "spearman": spearman(y, pred),
+        "squared_error_sum": format(
+            sum((a - b) ** 2 for a, b in zip(y, pred)), ".12g"
+        ),
+        "uniform_tss": format(sum((a - uniform) ** 2 for a in y), ".12g"),
+        "total_variation": format(
+            .5 * sum(abs(a - b) for a, b in zip(y, pred)), ".12g"
+        ),
+        "spearman": format(spearman(y, pred), ".12g"),
     }
 
 

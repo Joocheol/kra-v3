@@ -71,14 +71,14 @@ def load_rows(path: pathlib.Path) -> list[dict[str, object]]:
                 "residual_min": lo,
                 "residual_mid": mid,
                 "residual_max": hi,
-                "tickets_per_cell_mid": mid / cells,
+                "tickets_per_cell_mid": format(mid / cells, ".12g"),
                 "deterministic_min_zeros": int(row["min_unbet_cells"]),
                 "deterministic_max_zeros": int(row["max_unbet_cells"]),
                 # More allocated tickets imply fewer empty cells.
-                "expected_zeros_at_residual_max": mean_hi_tickets,
-                "expected_zeros_at_residual_mid": mean_mid,
-                "expected_zeros_at_residual_min": mean_lo_tickets,
-                "variance_zeros_at_residual_mid": variance_mid,
+                "expected_zeros_at_residual_max": format(mean_hi_tickets, ".12g"),
+                "expected_zeros_at_residual_mid": format(mean_mid, ".12g"),
+                "expected_zeros_at_residual_min": format(mean_lo_tickets, ".12g"),
+                "variance_zeros_at_residual_mid": format(variance_mid, ".12g"),
             })
     return out
 

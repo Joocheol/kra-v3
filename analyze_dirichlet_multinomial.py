@@ -97,7 +97,7 @@ def summarize(vectors_by_threshold: dict[str, list[tuple[str, np.ndarray]]]) -> 
         all_vectors = vectors_by_threshold[threshold]
         train = [vector for year, vector in all_vectors if year <= "2024"]
         test = [vector for year, vector in all_vectors if year == "2025"]
-        alpha = fit_alpha(train)
+        alpha = float(format(fit_alpha(train), ".12g"))
         def stats(vectors: list[np.ndarray]) -> tuple[int, int, float]:
             cells = sum(len(vector) for vector in vectors)
             tickets = sum(int(vector.sum()) for vector in vectors)
@@ -110,15 +110,15 @@ def summarize(vectors_by_threshold: dict[str, list[tuple[str, np.ndarray]]]) -> 
         test_cells, test_tickets, test_gain = stats(test)
         rows.append({
             "threshold": threshold,
-            "alpha": alpha,
+            "alpha": format(alpha, ".12g"),
             "training_races": len(train),
             "training_cells": train_cells,
             "training_tickets": train_tickets,
-            "training_loglik_gain_per_cell": train_gain,
+            "training_loglik_gain_per_cell": format(train_gain, ".12g"),
             "test_races": len(test),
             "test_cells": test_cells,
             "test_tickets": test_tickets,
-            "test_loglik_gain_per_cell": test_gain,
+            "test_loglik_gain_per_cell": format(test_gain, ".12g"),
         })
     return rows
 
@@ -144,10 +144,16 @@ def actual_rows(path: pathlib.Path, alpha: float) -> list[dict]:
                 "residual_min": lo,
                 "residual_mid": mid,
                 "residual_max": hi,
-                "alpha": alpha,
-                "expected_zeros_residual_max": cells * zero_probability(cells, hi, alpha),
-                "expected_zeros_residual_mid": cells * zero_probability(cells, mid, alpha),
-                "expected_zeros_residual_min": cells * zero_probability(cells, lo, alpha),
+                "alpha": format(alpha, ".12g"),
+                "expected_zeros_residual_max": format(
+                    cells * zero_probability(cells, hi, alpha), ".12g"
+                ),
+                "expected_zeros_residual_mid": format(
+                    cells * zero_probability(cells, mid, alpha), ".12g"
+                ),
+                "expected_zeros_residual_min": format(
+                    cells * zero_probability(cells, lo, alpha), ".12g"
+                ),
             })
     return rows
 

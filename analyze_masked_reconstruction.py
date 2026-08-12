@@ -331,13 +331,13 @@ def evaluate_race(
                     "masked_singleton_cells": int(((lower == upper) & masked).sum()),
                     "masked_tickets": residual,
                     "absolute_error_sum": int(np.abs(predicted - truth).sum()),
-                    "squared_log1p_error_sum": float(
+                    "squared_log1p_error_sum": format(float(
                         np.square(np.log1p(predicted) - np.log1p(truth)).sum()
-                    ),
+                    ), ".12g"),
                     "exact_cells": int((predicted == truth).sum()),
-                    "cross_entropy_sum": float(
+                    "cross_entropy_sum": format(float(
                         -(truth * np.log(np.maximum(probabilities, 1e-300))).sum()
-                    ),
+                    ), ".12g"),
                 })
     return rows
 
