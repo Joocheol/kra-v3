@@ -14,6 +14,9 @@
 
 ## 절차
 
+0. 시작하기 전에 `git pull --ff-only` 로 이 지시서 자체가 최신인지 먼저
+   받는다. 이 파일이 원격에서 고쳐졌을 수 있다.
+
 1. 아카이브에서 임의로 한 경주를 고른다.
    `~/Dropbox/kra-analysis/data/raw_collected_v3_15w/kra_*/raw_archive/*/*/*.json.gz`
 
