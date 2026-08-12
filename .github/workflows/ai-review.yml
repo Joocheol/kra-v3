@@ -124,6 +124,7 @@ jobs:
         with:
           name: claude-review-evidence-${{ github.event.pull_request.number }}
           path: .ai-review-input
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 1
 
