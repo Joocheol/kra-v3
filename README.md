@@ -44,8 +44,31 @@ Dirichlet--multinomial의 기대 무투표가 거의 0인 결과도 지원집합
 이는 배분규칙을 고정한 민감도다. 비균등 배분과 2·3착 축 반전 결과도 보고서에
 병기한다. 위치별 비균등 배분(`beta=0.10`)은 거의 같은 결과였지만, 2·3착 축을
 뒤집으면 쌍승 `R²`가 0.83919, 복승은 0.87469로 크게 낮아져 파싱한 축 방향을
-내부적으로 지지했다. 이 수치는 풀 사이의 내부 가격 정합성이며, 실제 착순
-예측력이나 시장효율성을 뜻하지 않는다.
+내부적으로 지지했다. 이 수치는 풀 사이의 내부 가격 정합성이다.
+
+### 2025년 실제 착순 평가
+
+가격 정합성과 별개로, 2025년 2,426경주의 실제 1·2·3착 순서조합을 사후 채점했다.
+삼쌍승 상태분포는 착순을 보기 전에 배당판과 해당 풀 총매출만으로 완성한다.
+
+- 삼쌍승 균등완성 평균 Brier: **0.9916302**
+- 단승 Harville 평균 Brier: **0.9926153**
+- 평균 차이 `trifecta_uniform - win_harville`: **-0.00098517**
+  - 날짜 cluster bootstrap 95%: **[-0.00135358, -0.00058067]**
+- 2·3착 축을 뒤집으면 평균 Brier가 **0.9927140**으로 악화
+  - `swapped_23 - uniform`: **0.00108387**
+  - 날짜 cluster bootstrap 95%: **[0.00056428, 0.00161204]**
+- 실현 상태의 예측순위 중앙값: 삼쌍승 7.083%, Harville 7.645%
+- 실현 상태 상위 10%: 삼쌍승 1,417/2,426, Harville 1,383/2,426
+- 상한 잔여총량 하한·중간·상한의 평균 Brier: 0.9916293 / 0.9916302 / 0.9916311
+- 실현된 삼쌍승 조합 자체가 `9999.9`였던 경주는 8건이며, 8건 모두 사전
+  회계적 확률하한은 0이다. 확률상한 중앙값은 0.0000729다.
+
+따라서 삼쌍승 가격에는 단승 가격을 Harville로 순차확장한 것보다 실제 상위 세
+착순과 더 잘 정렬되는 정보가 들어 있다. 2·3착 축 반전이 실제 착순에서도
+악화된다는 결과는 페이지 방향성에 대한 외부 반증검사이기도 하다. 다만 이는
+정규화한 시장가격을 확률예측처럼 채점한 결과이며, 시장효율성·객관적 확률의
+정확성·인과효과를 뜻하지 않는다.
 
 교차시장 단계가 사용하는 원시 격자도 별도 전수검사했다. 2022--2025년 9,671개
 경주의 19,827,297개 숫자 행을 읽었고, 동일값 중복 2,823,966행은 있었지만
@@ -64,6 +87,7 @@ Dirichlet--multinomial의 기대 무투표가 거의 0인 결과도 지원집합
 - `findings/dirichlet_multinomial.md`
 - `findings/cross_market_reconstruction.md`
 - `findings/cross_market_input_validation.md`
+- `findings/outcome_evaluation.md`
 
 ## 재현
 
@@ -78,17 +102,22 @@ python3 analyze_dirichlet_multinomial.py
 python3 analyze_cross_market.py
 python3 validate_cross_market_inputs.py
 python3 diagnose_snapshot_mismatch.py
+python3 analyze_outcome_evaluation.py
 git diff --exit-code -- \
   findings \
   데이터/dirichlet_multinomial_fit.csv \
   데이터/winning_payout_html.sha256
+actual="$(gzip -cd 데이터/outcome_evaluation.csv.gz | sha256sum | awk '{print $1}')"
+expected="$(tr -d '[:space:]' < 데이터/outcome_evaluation.sha256)"
+test "$actual" = "$expected"
 ```
 
-현재 단위·속성·종단간·스냅샷 진단 테스트는 30개다. CI에서는 새 입력검증과
-스냅샷 진단도 전수 실행하며, 모든 압축 CSV를 풀어 커밋 산출물과 내용 단위로도
-비교한다.
+현재 단위·속성·종단간·스냅샷·착순평가 테스트는 33개다. CI에서는 입력검증,
+스냅샷 진단, 2025년 착순 평가를 전수 실행한다. 착순평가 보고서는 커밋본과
+직접 비교하고, 경주별 16,982행 결과는 압축 해제 내용의 SHA-256
+`c3bc666c1e67f45c3def697bb80b2f4467c37cb97a8d310ef42f5610d202512b`로 고정한다.
 
-분석 원칙과 후속 모형의 정보 분리는 `RESEARCH_PROTOCOL.md`를 따른다.
+분석 원칙과 정보 분리는 `RESEARCH_PROTOCOL.md`를 따른다.
 
 ## Claude 독립 연구검토
 
