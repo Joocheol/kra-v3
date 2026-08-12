@@ -33,6 +33,27 @@ jobs:
       - name: Show outcome report
         run: cat findings/outcome_evaluation.md
 
+  masked-reconstruction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install analysis dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
+      - name: Preserve committed masked artifact
+        run: cp 데이터/masked_reconstruction_results.csv.gz /tmp/masked-committed.csv.gz
+      - name: Reproduce masked reconstruction
+        run: python3 analyze_masked_reconstruction.py
+      - name: Verify full masked CSV content
+        run: >-
+          cmp
+          <(gzip -cd /tmp/masked-committed.csv.gz)
+          <(gzip -cd 데이터/masked_reconstruction_results.csv.gz)
+      - name: Verify frozen masked report
+        run: git diff --exit-code -- findings/masked_reconstruction.md
+
   core-validation:
     runs-on: ubuntu-latest
     timeout-minutes: 30
