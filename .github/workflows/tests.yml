@@ -9,7 +9,23 @@ permissions:
   contents: read
 
 jobs:
-  unit-tests:
+  outcome-evaluation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install analysis dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
+      - name: Test outcome scoring helpers
+        run: python3 -m unittest discover -s tests -p 'test_outcome_evaluation.py' -v
+      - name: Evaluate 2025 realized outcomes
+        run: python3 analyze_outcome_evaluation.py
+      - name: Show outcome report
+        run: cat findings/outcome_evaluation.md
+
+  core-validation:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -20,8 +36,6 @@ jobs:
         run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
       - name: Run unit tests
         run: python3 -m unittest discover -s tests -v
-      - name: Evaluate 2025 realized outcomes
-        run: python3 analyze_outcome_evaluation.py
       - name: Validate cross-market grids
         run: python3 validate_cross_market_inputs.py
       - name: Diagnose nearby snapshot timing
