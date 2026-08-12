@@ -4,8 +4,10 @@
 The legacy ``check_coherence.load_month`` loader predates the strict trifecta
 loader and writes mapped cells into dictionaries.  This preflight proves that,
 for the 2022--2025 substantive sample, the weaker code path cannot silently
-lose information through spanned numeric cells, duplicate mapped keys, missing
-active-horse combinations, or extra combinations.
+lose information through spanned numeric cells, conflicting duplicate mapped
+keys, missing active-horse combinations, or extra combinations.  Identical
+redundant displays are counted but are harmless because dictionary overwrite
+preserves the same observed value.
 """
 from __future__ import annotations
 
@@ -63,8 +65,10 @@ def mapped_key(pk: str, row: dict[str, str]):
 def validate(data_dir: pathlib.Path) -> dict[str, int]:
     races = load_races(data_dir / "races.jsonl.gz")
     months = sorted({race["date"][:7] for race in races.values()})
-    seen: dict[str, dict[str, set]] = defaultdict(lambda: defaultdict(set))
-    numeric_rows = spanned_numeric = duplicates = 0
+    seen: dict[str, dict[str, dict[object, str]]] = defaultdict(
+        lambda: defaultdict(dict)
+    )
+    numeric_rows = spanned_numeric = duplicate_rows = conflicting_duplicates = 0
 
     for month in months:
         for pk in PAGE_KEYS:
@@ -89,10 +93,17 @@ def validate(data_dir: pathlib.Path) -> dict[str, int]:
                     if mapped is None:
                         continue
                     target, key = mapped
-                    if key in seen[race_id][target]:
-                        duplicates += 1
-                        raise ValueError(f"{race_id}: duplicate {target} key {key!r}")
-                    seen[race_id][target].add(key)
+                    prior = seen[race_id][target].get(key)
+                    if prior is not None:
+                        duplicate_rows += 1
+                        if prior != row["cell_raw"]:
+                            conflicting_duplicates += 1
+                            raise ValueError(
+                                f"{race_id}: conflicting duplicate {target} key {key!r}: "
+                                f"{prior!r} vs {row['cell_raw']!r}"
+                            )
+                        continue
+                    seen[race_id][target][key] = row["cell_raw"]
 
     checked = 0
     for race_id, race in races.items():
@@ -105,7 +116,7 @@ def validate(data_dir: pathlib.Path) -> dict[str, int]:
             "trifecta": set(itertools.permutations(active, 3)),
         }
         for target in TARGETS:
-            actual = seen[race_id][target]
+            actual = set(seen[race_id][target])
             if actual != expected[target]:
                 missing = len(expected[target] - actual)
                 extra = len(actual - expected[target])
@@ -118,7 +129,8 @@ def validate(data_dir: pathlib.Path) -> dict[str, int]:
         "races": checked,
         "numeric_rows": numeric_rows,
         "spanned_numeric": spanned_numeric,
-        "duplicates": duplicates,
+        "duplicate_rows": duplicate_rows,
+        "conflicting_duplicates": conflicting_duplicates,
     }
     print("CROSS_MARKET_PREFLIGHT " + json.dumps(result, sort_keys=True))
     return result
