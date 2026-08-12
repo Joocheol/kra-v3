@@ -188,8 +188,24 @@ def _horse_column(leaf: dict[int, str]) -> int | None:
     return None
 
 
+SALES_SUFFIX = "매출총액"
+
+
 def _sales_and_notice(table: Table) -> tuple[dict[str, str], str]:
-    """`<tfoot>` carries per-pool turnover and the scratch notice."""
+    """`<tfoot>` carries per-pool turnover and the scratch notice.
+
+    Two label shapes appear across pages, confirmed against raw HTML in
+    findings/tfoot_diagnosis.md:
+
+        Scm                    "단승식 : 33,279,700원"   -- one cell, colon-joined
+        Both / Bc / 3Bc / 3Both "쌍승식 매출총액" | "289,737,000원"
+                                                          -- label and amount in
+                                                             adjacent cells, no colon
+
+    Scm's colon format covers only 3 of the 7 pools (+ the Scm-page total);
+    the other 4 pools' turnover lives on their own page, in this split shape.
+    Both shapes must be read or 4 of 7 pools silently vanish.
+    """
     foot = table.section("foot")
     sales: dict[str, str] = {}
     notice = ""
@@ -199,10 +215,18 @@ def _sales_and_notice(table: Table) -> tuple[dict[str, str], str]:
         if texts and texts[0].startswith(CANCEL_NOTICE):
             notice = texts[1] if len(texts) > 1 else ""
             continue
-        for t in texts:
+        i = 0
+        while i < len(texts):
+            t = texts[i]
             if ":" in t:
                 label, _, amount = t.partition(":")
                 sales[label.strip()] = amount.strip()
+                i += 1
+            elif t.endswith(SALES_SUFFIX) and i + 1 < len(texts):
+                sales[t[:-len(SALES_SUFFIX)].strip()] = texts[i + 1].strip()
+                i += 2
+            else:
+                i += 1
     return sales, notice
 
 
@@ -276,10 +300,30 @@ def parse_race(payload: dict, *, sections=("body", "foot")) -> tuple[Race, list[
                     colspan=cell.colspan, spanned=int(cell.spanned),
                 ))
 
-        # Race-level facts are taken from Scm, the only page that carries them.
+        # Turnover is collected from every page, not just Scm: Scm's colon
+        # format ("단승식 : 33,279,700원") carries only 3 of the 7 pools plus
+        # its own page total, while the other 4 pools' turnover lives on
+        # their own page (Both/Bc/3Bc/3Both) in a different, split shape --
+        # confirmed against raw HTML in findings/tfoot_diagnosis.md. 3Bc and
+        # 3Both repeat the same figure across their per-fixed-horse variant
+        # pages, so a mismatch across variants is recorded as a problem
+        # rather than silently overwritten (the "halt not skip" rule for
+        # anything that could hide a real discrepancy).
+        page_sales, page_notice = _sales_and_notice(table)
+        for label, amount in page_sales.items():
+            prior = race.sales.get(label)
+            if prior is not None and prior != amount:
+                race.problems.append(
+                    f"{page_key}{'/' + variant if variant else ''}: "
+                    f"매출액 불일치 {label!r} {prior!r} vs {amount!r}")
+            else:
+                race.sales[label] = amount
+
+        # Race-level facts other than turnover are taken from Scm, the only
+        # page that carries them.
         if page_key == "Scm":
             race.arrival = extract_arrival(html)
-            race.sales, race.cancel_notice = _sales_and_notice(table)
+            race.cancel_notice = page_notice
             win_col = next((c for c, g in sorted(group.items()) if g == WIN_GROUP), None)
             if hcol is None or win_col is None:
                 race.problems.append(f"Scm: '{WIN_GROUP}' 열을 찾지 못함")
