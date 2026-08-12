@@ -24,8 +24,12 @@ jobs:
         run: python3 analyze_outcome_evaluation.py
       - name: Verify frozen outcome report
         run: git diff --exit-code -- findings/outcome_evaluation.md
-      - name: Show outcome content checksum
-        run: gzip -cd 데이터/outcome_evaluation.csv.gz | sha256sum
+      - name: Verify full outcome CSV content hash
+        run: |
+          actual="$(gzip -cd 데이터/outcome_evaluation.csv.gz | sha256sum | awk '{print $1}')"
+          expected="$(tr -d '[:space:]' < 데이터/outcome_evaluation.sha256)"
+          test "$actual" = "$expected"
+          echo "$actual"
       - name: Show outcome report
         run: cat findings/outcome_evaluation.md
 
