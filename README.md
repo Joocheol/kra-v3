@@ -18,11 +18,15 @@
   의존하며, 주표본 결과나 대표 추정치로 사용하지 않음
 - 불일치 셀을 `[1,T]`로 두는 182--2,244,248개 최악경계는 제외 셀 수를
   기계적으로 더한 값이라 동등한 강건성 추정치로 사용하지 않음
+- 2016--2019년의 반올림 불일치 2,239경주는 최종 삼쌍승 총마권보다 1% 또는
+  5% 이른 **단일** 스냅샷으로 모든 미검열 셀을 설명할 수 있는 경우가 0건
 
 원자료에는 2020·2021년 파티션이 없다. 2016--2019년에는 최종 매출과 양립하지
 않는 미검열 셀이 있지만 2022--2025년에는 없으므로, 후속 확률모형과 설명력
-분석은 2022--2025년만 주표본으로 쓴다. 이전 시기는 원인이 해명되지 않은 역사적
-진단표본이며 강건성 증거로 사용하지 않는다.
+분석은 2022--2025년만 주표본으로 쓴다. 2016--2019년의 2,239개 불일치는
+단순한 1--5% 이내의 가까운 배당판 스냅샷 시점 차이로도 해소되지 않았다.
+따라서 이전 시기는 원인이 해명되지 않은 역사적 진단표본이며 강건성 증거로
+사용하지 않는다.
 
 ## 실질 분석 결과
 
@@ -43,14 +47,23 @@ Dirichlet--multinomial의 기대 무투표가 거의 0인 결과도 지원집합
 내부적으로 지지했다. 이 수치는 풀 사이의 내부 가격 정합성이며, 실제 착순
 예측력이나 시장효율성을 뜻하지 않는다.
 
+교차시장 단계가 사용하는 원시 격자도 별도 전수검사했다. 2022--2025년 9,671개
+경주의 19,827,297개 숫자 행을 읽었고, 동일값 중복 2,823,966행은 있었지만
+서로 다른 값의 충돌 중복과 숫자 spanned 셀은 각각 0건이었다. 단승·복승·쌍승·
+삼복승·삼쌍승의 활성마 조합 support도 전 경주에서 이론값과 정확히 일치했다.
+이는 현재 표본에서 기존 dictionary 로더가 중복·병합·누락으로 가격표를 조용히
+바꾸는 경로를 차단한다.
+
 자세한 결과는 다음 보고서에 있다.
 
 - `findings/winning_capped_payouts.md`
 - `findings/trifecta_feasible_sets.md`
+- `findings/snapshot_timing.md`
 - `findings/masked_reconstruction.md`
 - `findings/sparse_multinomial_baseline.md`
 - `findings/dirichlet_multinomial.md`
 - `findings/cross_market_reconstruction.md`
+- `findings/cross_market_input_validation.md`
 
 ## 재현
 
@@ -63,13 +76,17 @@ python3 analyze_masked_reconstruction.py
 python3 analyze_sparse_baseline.py
 python3 analyze_dirichlet_multinomial.py
 python3 analyze_cross_market.py
+python3 validate_cross_market_inputs.py
+python3 diagnose_snapshot_mismatch.py
 git diff --exit-code -- \
   findings \
   데이터/dirichlet_multinomial_fit.csv \
   데이터/winning_payout_html.sha256
 ```
 
-CI에서는 모든 압축 CSV를 풀어 커밋 산출물과 내용 단위로도 비교한다.
+현재 단위·속성·종단간·스냅샷 진단 테스트는 30개다. CI에서는 새 입력검증과
+스냅샷 진단도 전수 실행하며, 모든 압축 CSV를 풀어 커밋 산출물과 내용 단위로도
+비교한다.
 
 분석 원칙과 후속 모형의 정보 분리는 `RESEARCH_PROTOCOL.md`를 따른다.
 
