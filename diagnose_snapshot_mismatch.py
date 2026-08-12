@@ -8,9 +8,10 @@ compatible with the maintained 73%, 100-won, positive-half-up display model.
 
 The search is exact inside the declared window.  Candidate totals are generated
 from the incompatible cells first; those cells have narrow integer-ticket
-intervals by construction, which keeps the race-level candidate set small.
-The remaining uncapped cells then filter the same candidate totals.  Capped
-9999.9 cells and the unresolved 1.0 lower-code cells are not used to select T'.
+intervals by construction.  Candidate totals are then tested from closest to
+the final pool downward, stopping at the first total that preserves every
+uncapped cell.  Capped 9999.9 cells and the unresolved 1.0 lower-code cells are
+not used to select T'.
 """
 from __future__ import annotations
 
@@ -100,19 +101,14 @@ def explain_race(values: list[Decimal], final_t: int, window_bp: int) -> tuple[i
             return None, len(incompatible), 0
 
     assert candidates is not None
-    # A common earlier snapshot must also preserve every cell that happened to
-    # be compatible at the final total.  Filter candidate T values exactly.
-    for value in values:
-        candidates = {
-            t for t in candidates
-            if displayed_ticket_interval(t * 100, value)
-        }
-        if not candidates:
-            return None, len(incompatible), 0
-
-    # Closest earlier snapshot is the conservative diagnostic.
-    best = max(candidates)
-    return best, len(incompatible), len(candidates)
+    n_candidates = len(candidates)
+    # Exact existence test, but stop as soon as the closest valid earlier
+    # snapshot is found.  Most candidate totals fail on one of the first few
+    # cells, so this avoids repeatedly materialising large filtered sets.
+    for total in sorted(candidates, reverse=True):
+        if all(displayed_ticket_interval(total * 100, value) for value in values):
+            return total, len(incompatible), n_candidates
+    return None, len(incompatible), n_candidates
 
 
 def run(data_dir: pathlib.Path, window_bp: int) -> dict:
