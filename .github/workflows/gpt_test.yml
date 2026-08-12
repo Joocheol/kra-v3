@@ -34,5 +34,15 @@ jobs:
           git config user.name "gpt-test-bot"
           git config user.email "actions@github.com"
           git add findings/gpt_test_response.md
-          git commit -m "GPT 테스트 응답" || echo "변경 없음 — 커밋할 것이 없다"
-          git push
+          git commit -m "GPT 테스트 응답" || { echo "변경 없음 — 커밋할 것이 없다"; exit 0; }
+          for i in 1 2 3 4 5; do
+            if git push; then
+              exit 0
+            fi
+            echo "push 거부됨 (다른 작업이 동시에 main 에 쓰고 있다) — rebase 후 재시도 $i/5"
+            git fetch origin main
+            git rebase origin/main
+            sleep $((i * 3))
+          done
+          echo "5회 재시도 후에도 push 실패"
+          exit 1
