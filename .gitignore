@@ -1,4 +1,5 @@
 outputs/parsed/
+outputs/winning_payout_html/
 
 # 환경
 .venv/
