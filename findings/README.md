@@ -11,7 +11,7 @@
 - `cross_market_reconstruction.md`: 하위 승식 가격의 조건부 내부 정합성
 - `cross_market_input_validation.md`: 교차시장 원시 격자의 전수 preflight
 - `outcome_evaluation.md`: 사전 고정한 2025년 실제 착순 평가
-- `outcome_robustness.md`: Claude 1차 검토 후 할인형 기준선·복제·외부검증·부분식별 강건성
+- `outcome_robustness.md`: Claude 2차 검토 후 dual-discount 기준선·실제 쌍승 풀 비교·capped-mass 검정·부분식별 강건성
 
 나머지 문서는 탐색 과정의 과거 메모다. `censored_grid.md`, `point_id_gap.md`,
 `tfoot_diagnosis.md`, `cells_committed.md`, `sales_verification.md`는 현재 파이프라인보다
