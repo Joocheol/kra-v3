@@ -1,0 +1,38 @@
+name: Commit outcome robustness artifacts
+
+on:
+  push:
+    branches: [agent/outcome-evaluation]
+
+permissions:
+  contents: write
+
+jobs:
+  freeze:
+    if: github.event.head_commit.message == 'Add outcome robustness artifact freeze'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: agent/outcome-evaluation
+          fetch-depth: 1
+          persist-credentials: true
+      - name: Install analysis dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
+      - name: Reproduce robustness analysis
+        run: |
+          python3 -m unittest discover -s tests -p 'test_outcome_robustness.py' -v
+          python3 analyze_outcome_robustness.py
+      - name: Commit frozen artifacts
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add findings/outcome_robustness.md
+          git add -f 데이터/outcome_robustness.csv.gz
+          if git diff --cached --quiet; then
+            echo 'Robustness artifacts already match.'
+            exit 0
+          fi
+          git commit -m 'Freeze outcome robustness artifacts'
+          git push origin HEAD:agent/outcome-evaluation
