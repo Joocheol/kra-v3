@@ -85,6 +85,9 @@ O_rma = (1-t_m) S_rm / (100 n_rma),  n_rma > 0
 7. **완료 — 실제 착순 시간외 평가**: 배당판·총매출만으로 먼저 완성한 삼쌍승
    상태분포를 2025년 실제 1·2·3착 순서에 사후 채점한다. 주지표는 다항 Brier,
    비순환 기준선은 단승 Harville, 방향성 반증은 2·3착 축 반전으로 사전 고정한다.
+   Claude 1차 검토 뒤에는 2022--2024년으로만 적합한 discounted-Harville,
+   과거 3개년 retrospective replication, 상한셀 배분의 exact adversarial envelope,
+   실제 상한 적중 8건의 지급배당 대조와 calibration을 사후 강건성 분석으로 분리한다.
 
 ## 정보 분리
 
@@ -97,6 +100,9 @@ O_rma = (1-t_m) S_rm / (100 n_rma),  n_rma > 0
   착순·당첨여부·지급배당은 삼쌍승 상태표 완성에 입력하지 않는다.
 - 2025년 착순평가의 모형·주지표·기준선·bootstrap 비교는 결과를 보기 전에
   Draft PR #4에 고정했다.
+- discounted-Harville과 2022--2024 복제, 실제 상한 적중셀 지급대조,
+  adversarial allocation envelope와 calibration은 Claude 1차 검토 뒤 추가한
+  사후 강건성 분석으로 원래 확인분석과 명시적으로 구분한다.
 
 ## 검증
 
@@ -144,6 +150,19 @@ O_rma = (1-t_m) S_rm / (100 n_rma),  n_rma > 0
 - 착순평가 경주별 16,982행 산출물은 압축을 푼 CSV 내용의 SHA-256
   `c3bc666c1e67f45c3def697bb80b2f4467c37cb97a8d310ef42f5610d202512b`로 고정하고
   CI에서 다시 계산한다.
+- 2022--2024년 NLL로 적합한 discounted-Harville의 `lambda`는 0.740이며,
+  이를 고정한 2025년 `trifecta - discounted Harville` Brier 차이는
+  -0.00061027, 95% 날짜-cluster 구간은 [-0.00098080, -0.00023560]이다.
+- 결과를 사용하지 않은 원래 세 모형의 2022--2024년 7,245경주 복제에서
+  `trifecta - ordinary Harville` Brier 차이는 -0.00085216,
+  95% 구간은 [-0.00107847, -0.00060932]다.
+- `residual_mid`와 미검열 정수완성을 고정한 뒤 모든 허용 상한셀 정수배분을
+  극단화한 2025 평균 Brier 범위는 0.9916300--0.9916306이다. 실현상태
+  확률하한이 0인 8경주 때문에 NLL의 완전한 adversarial 최악경계는 무한대다.
+- 2025년 실제 상한 적중 8건은 KRA 지급식 마권 수가 모두 점식별됐지만,
+  당첨 상한셀만 관측되는 선택표본이므로 전체 상한셀의 대표 정확도로 쓰지 않는다.
+- 강건성 보고서와 전체 경주별 CSV는 각각 `findings/outcome_robustness.md`와
+  `데이터/outcome_robustness.csv.gz`에 동결하고 CI에서 내용 단위로 재생성한다.
 - 가상 상한 모형은 실제 `n=0`을 포함하지 않으므로 구조적 0의 빈도나 존재를
   검증한 것으로 해석하지 않는다.
 - 가상 상한 원표본과 실제 상한 대상의 출전두수·격자크기·셀당 마권 분포를

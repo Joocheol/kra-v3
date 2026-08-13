@@ -51,8 +51,17 @@ jobs:
         run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
       - name: Test robustness helpers
         run: python3 -m unittest discover -s tests -p 'test_outcome_robustness.py' -v
+      - name: Preserve committed robustness artifact
+        run: cp 데이터/outcome_robustness.csv.gz /tmp/outcome-robustness-committed.csv.gz
       - name: Evaluate outcome robustness
         run: python3 analyze_outcome_robustness.py
+      - name: Verify full robustness CSV content
+        run: >-
+          cmp
+          <(gzip -cd /tmp/outcome-robustness-committed.csv.gz)
+          <(gzip -cd 데이터/outcome_robustness.csv.gz)
+      - name: Verify frozen robustness report
+        run: git diff --exit-code -- findings/outcome_robustness.md
       - name: Show robustness report
         run: cat findings/outcome_robustness.md
 

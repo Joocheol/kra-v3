@@ -70,6 +70,29 @@ Dirichlet--multinomial의 기대 무투표가 거의 0인 결과도 지원집합
 정규화한 시장가격을 확률예측처럼 채점한 결과이며, 시장효율성·객관적 확률의
 정확성·인과효과를 뜻하지 않는다.
 
+### Claude 1차 검토 후 강건성 분석
+
+최초 2025 설계와 수치를 커밋으로 고정한 뒤 별도의 사후 강건성 분석을 수행했다.
+2022--2024 착순으로만 discounted-Harville의 조건부 할인모수
+`lambda=0.740`을 적합하고 이를 고정해 2025년에 적용했다.
+
+- 2025 삼쌍승 균등완성 Brier: **0.9916302**
+- 2025 discounted-Harville Brier: **0.9922405**
+- 평균 차이: **-0.00061027**
+  - 날짜 cluster bootstrap 95%: **[-0.00098080, -0.00023560]**
+- 2022--2024년 7,245경주 retrospective replication:
+  삼쌍승 - 일반 Harville **-0.00085216**
+  (95% **[-0.00107847, -0.00060932]**)
+- `residual_mid`를 고정하고 허용되는 모든 상한셀 정수배분을 극단화한
+  2025 평균 Brier 범위: **0.9916300--0.9916306**
+
+실제 적중조합이 `9999.9`였던 2025년 8경주는 동결 KRA 지급표와 전부 연결됐다.
+지급식 마권 수는 8/8건에서 점식별됐고 균등완성 배정의 평균 절대오차는
+59.344장이었다. 이는 당첨된 상한셀만 관측되는 선택표본이므로 전체 상한셀의
+대표 정확도로 해석하지 않는다. 자세한 결과는
+`findings/outcome_robustness.md`에 있으며, 전체 경주별 결과도
+`데이터/outcome_robustness.csv.gz`로 동결한다.
+
 교차시장 단계가 사용하는 원시 격자도 별도 전수검사했다. 2022--2025년 9,671개
 경주의 19,827,297개 숫자 행을 읽었고, 동일값 중복 2,823,966행은 있었지만
 서로 다른 값의 충돌 중복과 숫자 spanned 셀은 각각 0건이었다. 단승·복승·쌍승·
@@ -103,8 +126,10 @@ python3 analyze_cross_market.py
 python3 validate_cross_market_inputs.py
 python3 diagnose_snapshot_mismatch.py
 python3 analyze_outcome_evaluation.py
+python3 analyze_outcome_robustness.py
 git diff --exit-code -- \
   findings \
+  데이터/outcome_robustness.csv.gz \
   데이터/dirichlet_multinomial_fit.csv \
   데이터/winning_payout_html.sha256
 actual="$(gzip -cd 데이터/outcome_evaluation.csv.gz | sha256sum | awk '{print $1}')"
@@ -112,9 +137,10 @@ expected="$(tr -d '[:space:]' < 데이터/outcome_evaluation.sha256)"
 test "$actual" = "$expected"
 ```
 
-현재 단위·속성·종단간·스냅샷·착순평가 테스트는 35개다. CI에서는 입력검증,
-스냅샷 진단, 2025년 착순 평가를 전수 실행한다. 착순평가 보고서는 커밋본과
-직접 비교하고, 경주별 16,982행 결과는 압축 해제 내용의 SHA-256
+CI에서는 단위·속성·종단간 테스트, 입력검증, 스냅샷 진단, 2025년 착순평가와
+검토 후 강건성 분석을 전수 실행한다. 착순평가 보고서와 강건성 보고서는
+커밋본과 직접 비교하고, 두 압축 CSV도 압축을 푼 내용 단위로 대조한다.
+최초 경주별 착순평가 16,982행의 SHA-256은
 `c3bc666c1e67f45c3def697bb80b2f4467c37cb97a8d310ef42f5610d202512b`로 고정한다.
 
 분석 원칙과 정보 분리는 `RESEARCH_PROTOCOL.md`를 따른다.
