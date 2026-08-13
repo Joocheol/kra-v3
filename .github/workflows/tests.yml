@@ -130,3 +130,4 @@ jobs:
           git add -f 데이터/outcome_evaluation.csv.gz 데이터/outcome_evaluation.sha256 데이터/outcome_robustness.csv.gz
           git commit -m 'Freeze Claude round-3 outcome artifacts'
           git push origin HEAD:agent/outcome-evaluation
+# refresh round-3 artifact freeze
