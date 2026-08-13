@@ -451,7 +451,7 @@ def build_report(
     exacta_25 = paired_cluster_ci(rows, "trifecta_uniform_fractional", "exacta_anchored_win_third", y25, "brier", seed_offset=13)
     trio_exacta_25 = paired_cluster_ci(rows, "trifecta_uniform_fractional", "trio_exacta_anchored", y25, "brier", seed_offset=14)
     field_comparisons = []
-    for label, low_starters, high_starters in (("7--9", 7, 9), ("10--11", 10, 11), ("12--14", 12, 14), ("15--16", 15, 16), ("17+", 17, 99)):
+    for label, low_starters, high_starters in (("7--9", 7, 9), ("10--11", 10, 11), ("12--14", 12, 14), ("15--16", 15, 16), ("6 이하", 0, 6)):
         race_ids = {
             ctx["race"]["race_id"] for ctx in contexts
             if ctx["year"] == "2025"
