@@ -9,9 +9,86 @@ permissions:
   contents: read
 
 jobs:
-  unit-tests:
+  outcome-evaluation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install analysis dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
+      - name: Test outcome scoring helpers
+        run: python3 -m unittest discover -s tests -p 'test_outcome_evaluation.py' -v
+      - name: Preserve committed outcome artifact
+        run: cp 데이터/outcome_evaluation.csv.gz /tmp/outcome-committed.csv.gz
+      - name: Evaluate 2025 realized outcomes
+        run: python3 analyze_outcome_evaluation.py
+      - name: Verify full outcome CSV content
+        run: >-
+          cmp
+          <(gzip -cd /tmp/outcome-committed.csv.gz)
+          <(gzip -cd 데이터/outcome_evaluation.csv.gz)
+      - name: Verify frozen outcome report
+        run: git diff --exit-code -- findings/outcome_evaluation.md
+      - name: Verify full outcome CSV content hash
+        run: |
+          actual="$(gzip -cd 데이터/outcome_evaluation.csv.gz | sha256sum | awk '{print $1}')"
+          expected="$(tr -d '[:space:]' < 데이터/outcome_evaluation.sha256)"
+          test "$actual" = "$expected"
+          echo "$actual"
+      - name: Show outcome report
+        run: cat findings/outcome_evaluation.md
+
+  outcome-robustness:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install analysis dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
+      - name: Test robustness helpers
+        run: python3 -m unittest discover -s tests -p 'test_outcome_robustness.py' -v
+      - name: Preserve committed robustness artifact
+        run: cp 데이터/outcome_robustness.csv.gz /tmp/outcome-robustness-committed.csv.gz
+      - name: Evaluate outcome robustness
+        run: python3 analyze_outcome_robustness.py
+      - name: Verify full robustness CSV content
+        run: >-
+          cmp
+          <(gzip -cd /tmp/outcome-robustness-committed.csv.gz)
+          <(gzip -cd 데이터/outcome_robustness.csv.gz)
+      - name: Verify frozen robustness report
+        run: git diff --exit-code -- findings/outcome_robustness.md
+      - name: Show robustness report
+        run: cat findings/outcome_robustness.md
+
+  masked-reconstruction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install analysis dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
+      - name: Preserve committed masked artifact
+        run: cp 데이터/masked_reconstruction_results.csv.gz /tmp/masked-committed.csv.gz
+      - name: Reproduce masked reconstruction
+        run: python3 analyze_masked_reconstruction.py
+      - name: Verify full masked CSV content
+        run: >-
+          cmp
+          <(gzip -cd /tmp/masked-committed.csv.gz)
+          <(gzip -cd 데이터/masked_reconstruction_results.csv.gz)
+      - name: Verify frozen masked report
+        run: git diff --exit-code -- findings/masked_reconstruction.md
+
+  core-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:

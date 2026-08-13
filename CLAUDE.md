@@ -18,8 +18,12 @@ Claude의 역할은 공동저자나 자동 수정자가 아니라 **독립적이
    구간을 대표 결과로 해석한다.
 6. 동결 상세표·방향성 감사·미매칭 목록·압축 해제 내용 비교가 실제로
    재현되는지 확인한다.
+7. 2025년 실제 착순 proper-score 평가를 추가했으며, 복원은 착순을 보기 전에
+   완료한다.
+8. 1차 검토 뒤 discounted-Harville, 2022--2024 복제, exact allocation envelope,
+   실제 상한 적중 8건의 지급식 대조와 calibration을 사후 강건성으로 분리했다.
 
-연구의 기준 문서는 `RESEARCH_PROTOCOL.md`다. 현재 결과는 `findings/`의 여섯
+연구의 기준 문서는 `RESEARCH_PROTOCOL.md`다. 현재 결과는 `findings/`의 열 개
 보고서에 있고, 경주·셀 단위 산출물은 `데이터/*.csv.gz`에 있다. 실제 당첨으로
 참값이 드러난 상한 초과 사례는 `findings/winning_capped_payouts.md`와
 `데이터/winning_capped_payouts.csv.gz`에 있다.
@@ -36,6 +40,11 @@ Claude의 역할은 공동저자나 자동 수정자가 아니라 **독립적이
 - 다른 승식 정보를 사용한 복원과 후속 설명력 평가 사이의 정보 순환
 - 미래 자료 누출, 경주 내 의존성, 표준오차·가중치, 시간외 검증 분리
 - 코드·보고서·압축 산출물의 결정론적 재현성과 테스트의 충분성
+- discounted-Harville의 2022--2024 적합과 2025 확인표본 분리, 격자경계
+- 2022--2024 retrospective replication이 결과를 사용한 fitting과 섞이지 않는지
+- 상한셀 adversarial Brier envelope의 정수 최적화와 NLL 무한경계
+- 실제 상한 적중 8건의 지급식 대조가 당첨 선택표본이라는 한계
+- calibration 집계가 상태수 가중과 경주 간 의존성을 올바르게 다루는지
 
 ## 검토 행동 제한
 

@@ -355,11 +355,11 @@ def evaluate_race(
                     "absolute_error_sum": int(np.abs(predicted - truth).sum()),
                     "squared_log1p_error_sum": format(float(
                         np.square(np.log1p(predicted) - np.log1p(truth)).sum()
-                    ), ".12g"),
+                    ), ".10g"),
                     "exact_cells": int((predicted == truth).sum()),
                     "cross_entropy_sum": format(float(
                         -(truth * np.log(np.maximum(probabilities, 1e-300))).sum()
-                    ), ".12g"),
+                    ), ".10g"),
                 })
     return rows
 
