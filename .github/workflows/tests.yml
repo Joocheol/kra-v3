@@ -106,5 +106,3 @@ jobs:
           git diff --exit-code --
           findings/cross_market_input_validation.md
           findings/snapshot_timing.md
-
-
