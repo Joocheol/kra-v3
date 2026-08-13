@@ -37,6 +37,7 @@ FIELDS = [
     "outcome_probability", "zero_probability", "nll", "brier",
     "rank_percentile", "accounting_probability_min", "accounting_probability_max",
 ]
+BOOTSTRAP_DRAWS = 10000
 
 
 def harville_trifecta(win_odds: dict[int, float]) -> dict[tuple[int, int, int], float]:
@@ -59,8 +60,18 @@ def fractional_uniform_completion(
     """Remove arbitrary lexicographic tie-breaking among capped cells."""
     distribution = completed_trifecta(race, odds, info, scenario)
     capped = [combo for combo, value in odds.items() if value == 9999.9]
+    if len(capped) != info["capped_cells"]:
+        raise AssertionError(
+            f"{race['race_id']}: capped-cell count differs between loaders: "
+            f"{len(capped)} != {info['capped_cells']}"
+        )
+    total = _won(race["sales"]["삼쌍승식"]) // 100
+    if total != info["total_tickets"]:
+        raise AssertionError(
+            f"{race['race_id']}: total-ticket count differs between loaders: "
+            f"{total} != {info['total_tickets']}"
+        )
     if capped:
-        total = _won(race["sales"]["삼쌍승식"]) // 100
         share = info[scenario] / len(capped) / total
         for combo in capped:
             distribution[combo] = share
@@ -190,7 +201,7 @@ def clustered_delta_ci(
     metric: str,
     *,
     seed: int = 20260813,
-    draws: int = 2000,
+    draws: int = BOOTSTRAP_DRAWS,
 ) -> tuple[float, float, float, int]:
     a = {str(row["race_id"]): row for row in _model_rows(rows, model_a)}
     b = {str(row["race_id"]): row for row in _model_rows(rows, model_b)}
@@ -287,7 +298,7 @@ def make_report(rows: list[dict[str, object]], exclusions: dict[str, int]) -> st
     lines.extend([
         "", "## 주지표 비교: 날짜 cluster bootstrap", "",
         "차이는 앞 모형 - 뒤 모형이다. 음수면 앞 모형의 Brier가 더 작다. 2025년 "
-        "날짜를 cluster로 2,000회 재표집한 95% 구간을 병기한다.", "",
+        f"날짜를 cluster로 {BOOTSTRAP_DRAWS:,}회 재표집한 95% 구간을 병기한다.", "",
         "| 비교 | 평균 Brier 차이 | 95% cluster bootstrap | 경주 |",
         "| --- | ---: | ---: | ---: |",
         f"| trifecta_uniform - win_harville | {bdiff[0]:.8f} | [{bdiff[1]:.8f}, {bdiff[2]:.8f}] | {bdiff[3]:,} |",

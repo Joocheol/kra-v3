@@ -60,6 +60,8 @@ def load_feasible(path: pathlib.Path) -> dict[str, dict[str, int]]:
                 "residual_mid": (lo + hi) // 2,
                 "residual_max": hi,
                 "cap_upper": int(row["cap_ticket_upper"]),
+                "capped_cells": int(row["capped_cells"]),
+                "total_tickets": int(row["total_tickets"]),
             }
     return rows
 

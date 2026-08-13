@@ -1,4 +1,5 @@
 import itertools
+import pathlib
 import unittest
 
 from analyze_outcome_evaluation import harville_trifecta
@@ -57,10 +58,18 @@ class OutcomeRobustnessTests(unittest.TestCase):
         self.assertEqual((mean, low, high, pvalue), (1.0, 0, 2, 1.0))
 
     def test_governing_protocol_uses_current_dual_lambda(self):
-        text = open("RESEARCH_PROTOCOL.md", encoding="utf-8").read()
+        text = pathlib.Path("RESEARCH_PROTOCOL.md").read_text(encoding="utf-8")
         self.assertIn("lambda2=0.800", text)
         self.assertIn("lambda3=0.675", text)
         self.assertNotIn("lambda`는 0.740", text)
+
+    def test_documented_outcome_hash_matches_frozen_hash(self):
+        expected = pathlib.Path("데이터/outcome_evaluation.sha256").read_text(
+            encoding="utf-8"
+        ).strip()
+        for path in ("README.md", "RESEARCH_PROTOCOL.md"):
+            text = pathlib.Path(path).read_text(encoding="utf-8")
+            self.assertIn(expected, text)
 
     def test_sumsq_extrema_match_exhaustive_integer_boxes(self):
         n, total, lo, hi = 4, 9, 1, 4

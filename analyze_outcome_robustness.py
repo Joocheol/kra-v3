@@ -28,15 +28,12 @@ from analyze_outcome_evaluation import harville_trifecta, score_distribution, st
 from check_coherence import load_month, norm
 from kra.feasible import displayed_ticket_interval
 
-PRESPEC_SHA = "11fde096566f586eaa58c019b83c8e8ca10ac264"
-PRESPEC_TIME = "2026-08-12T20:55:26Z"
-FIRST_RESULTS_SHA = "d799ffc3d852782792344b3872d7c7a3a8b6af99"
-FIRST_RESULTS_TIME = "2026-08-12T21:04:00Z"
 LAMBDA_MIN = 0.25
 LAMBDA_MAX = 1.50
 LAMBDA_STEP = 0.005
-BOOTSTRAP_DRAWS = 2000
+BOOTSTRAP_DRAWS = 10000
 BOOTSTRAP_SEED = 20260813
+MIN_FIELD_DATE_CLUSTERS = 20
 
 FIELDS = [
     "race_id", "date", "year", "model", "states", "outcome_capped",
@@ -447,9 +444,52 @@ def build_report(
         comparisons.append((metric, paired_cluster_ci(rows, "trifecta_uniform_fractional", "win_harville_discounted", y25, metric, seed_offset=idx)))
     plain_rep = paired_cluster_ci(rows, "trifecta_uniform_fractional", "win_harville", ytrain, "brier", seed_offset=10)
     swap_rep = paired_cluster_ci(rows, "trifecta_swapped_23", "trifecta_uniform_fractional", ytrain, "brier", seed_offset=11)
-    plain_25 = paired_cluster_ci(rows, "trifecta_uniform_fractional", "win_harville", y25, "brier", seed_offset=12)
-    exacta_25 = paired_cluster_ci(rows, "trifecta_uniform_fractional", "exacta_anchored_win_third", y25, "brier", seed_offset=13)
-    trio_exacta_25 = paired_cluster_ci(rows, "trifecta_uniform_fractional", "trio_exacta_anchored", y25, "brier", seed_offset=14)
+    # Reuse the primary report's seed for the identical 2025 ordinary-Harville estimand.
+    plain_25 = paired_cluster_ci(rows, "trifecta_uniform_fractional", "win_harville", y25, "brier")
+    strong_models = models + ["exacta_anchored_win_third", "trio_exacta_anchored"]
+    ids_by_model = {
+        model: {str(row["race_id"]) for row in model_rows(rows, model, y25)}
+        for model in strong_models
+    }
+    common_ids = set.intersection(*(ids_by_model[model] for model in strong_models))
+    common_rows = [row for row in rows if row["year"] == "2025" and str(row["race_id"]) in common_ids]
+    common_s25 = {model: summary(model_rows(common_rows, model, y25)) for model in strong_models}
+    common_state_brier = float(common_s25["state_uniform"]["brier"])
+    common_bskill = {
+        model: 1 - float(common_s25[model]["brier"]) / common_state_brier
+        for model in strong_models if model != "state_uniform"
+    }
+    ladder = [
+        ("ordinary Harville", "win_harville"),
+        ("dual-discounted Harville", "win_harville_discounted"),
+        ("exacta+win", "exacta_anchored_win_third"),
+        ("trio+exacta", "trio_exacta_anchored"),
+    ]
+    ladder_comparisons = [
+        (label, paired_cluster_ci(
+            common_rows, "trifecta_uniform_fractional", model, y25, "brier",
+            seed_offset=30 + idx,
+        ))
+        for idx, (label, model) in enumerate(ladder)
+    ]
+    exacta_available = len(ids_by_model["exacta_anchored_win_third"])
+    trio_exacta_available = len(ids_by_model["trio_exacta_anchored"])
+    y25_context_by_id = {
+        str(ctx["race"]["race_id"]): ctx for ctx in contexts if ctx["year"] == "2025"
+    }
+    def exclusion_description(available: set[str]) -> str:
+        excluded = [ctx for rid, ctx in y25_context_by_id.items() if rid not in available]
+        starters = [
+            len(set(ctx["race"]["horses"]) - set(ctx["race"].get("scratched") or []))
+            for ctx in excluded
+        ]
+        capped_outcomes = sum(int(ctx["outcome_capped"]) for ctx in excluded)
+        return (
+            f"제외 {len(excluded):,}경주의 출전두수 중앙값 {statistics.median(starters):.1f}, "
+        f"범위 {min(starters)}--{max(starters)}, realized trifecta cap {capped_outcomes:,}건"
+        )
+    exacta_exclusions = exclusion_description(ids_by_model["exacta_anchored_win_third"])
+    trio_exacta_exclusions = exclusion_description(ids_by_model["trio_exacta_anchored"])
     field_comparisons = []
     for label, low_starters, high_starters in (("7--9", 7, 9), ("10--11", 10, 11), ("12--14", 12, 14), ("15--16", 15, 16), ("6 이하", 0, 6)):
         race_ids = {
@@ -458,13 +498,18 @@ def build_report(
             and low_starters <= len(set(ctx["race"]["horses"]) - set(ctx["race"].get("scratched") or [])) <= high_starters
         }
         subset = [row for row in rows if row["race_id"] in race_ids]
-        field_comparisons.append((
-            label,
-            paired_cluster_ci(
+        a = {str(row["race_id"]): row for row in model_rows(subset, "trifecta_uniform_fractional", y25)}
+        b = {str(row["race_id"]): row for row in model_rows(subset, "win_harville_discounted", y25)}
+        common = sorted(set(a) & set(b))
+        observed = statistics.mean(float(a[rid]["brier"]) - float(b[rid]["brier"]) for rid in common)
+        date_clusters = len({str(a[rid]["date"]) for rid in common})
+        ci = None
+        if date_clusters >= MIN_FIELD_DATE_CLUSTERS:
+            ci = paired_cluster_ci(
                 subset, "trifecta_uniform_fractional", "win_harville_discounted",
                 y25, "brier", seed_offset=20 + low_starters,
-            ),
-        ))
+            )
+        field_comparisons.append((label, observed, ci, len(common), date_clusters))
     y25_contexts = [ctx for ctx in contexts if ctx["year"] == "2025"]
     mass_samples = {
         "2025": y25_contexts,
@@ -492,14 +537,23 @@ def build_report(
     uncapped_outer = statistics.mean(
         uncapped_rounding_brier_outer_bound(ctx) for ctx in y25_contexts
     )
+    field_rows = []
+    for label, observed, ci, races, clusters in field_comparisons:
+        interval = "미추정" if ci is None else f"[{ci[1]:.8f}, {ci[2]:.8f}]"
+        note = f"날짜 cluster {clusters}; " + (
+            "소표본으로 CI 미추정" if ci is None else ""
+        )
+        field_rows.append(
+            f"| {label} | {observed:.8f} | {interval} | {races:,} | {clusters:,} | {note.rstrip('; ')} |"
+        )
 
     lines = [
         "# 실제 착순 평가 강건성·외부검증", "",
         "## 검토 후 설계 보강", "",
-        f"착순평가 점수 코드는 `{PRESPEC_SHA}` ({PRESPEC_TIME})에 커밋됐고 최초 수치 보고서는 "
-        f"`{FIRST_RESULTS_SHA}` ({FIRST_RESULTS_TIME})에 커밋됐다. 이 기록은 코드가 결과 보고서보다 앞섰음만 "
-        "보이며 외부 사전등록을 입증하지 않는다. 아래는 명시적 사후 강건성 분석이다.", "",
-        "2025는 원래의 확인표본으로 유지한다. 2022--2024 착순은 원래 삼쌍승 균등완성·일반 Harville·축반전 "
+        "저장소 이력에서는 착순평가 점수 코드가 최초 수치 보고서보다 앞선다. 이는 저장소 내부 순서에 대한 "
+        "기술적 기록일 뿐 외부 사전등록을 입증하지 않는다. 아래는 명시적 사후 강건성 분석이다.", "",
+        "2025의 원래 삼쌍승·일반 Harville·축반전 비교만 주지표로 유지한다. 이후 추가된 비교와 층화는 모두 "
+        "탐색적·사후 분석이다. 2022--2024 착순은 원래 삼쌍승 균등완성·일반 Harville·축반전 "
         "모형에 사용된 적이 없으므로 그 세 모형의 retrospective replication으로 보고한다. 동시에 같은 "
         "2022--2024 착순만 사용해 discounted-Harville의 lambda를 적합하고, 그 lambda를 고정해 2025에 적용한다.", "",
         f"분석 context는 2022--2025년 {len(contexts):,}경주이며 단승 상한가 검열 제외는 {win_censored:,}건이다.", "",
@@ -541,21 +595,39 @@ def build_report(
         "", f"참고로 원래 2025 trifecta - ordinary Harville Brier 차이는 {plain_25[0]:.8f} "
         f"[{plain_25[1]:.8f}, {plain_25[2]:.8f}]다.", "",
         "## 비-Harville pool 기준선", "",
-        f"미검열 쌍승식 풀로 1·2착 결합확률을 만들고 단승지분으로 3착만 조건화한 기준선과의 "
-        f"2025 공통표본 Brier 차이(trifecta - exacta-anchor)는 {exacta_25[0]:.8f} "
-        f"[{exacta_25[1]:.8f}, {exacta_25[2]:.8f}] (n={exacta_25[3]:,})다.", "",
-        f"더 강한 삼복승+쌍승 기준선은 삼복승으로 unordered top-three 집합을 정하고 쌍승으로 "
-        f"집합 안의 1·2착 순서를 배분한다. trifecta - trio+exacta Brier 차이는 "
-        f"{trio_exacta_25[0]:.8f} [{trio_exacta_25[1]:.8f}, {trio_exacta_25[2]:.8f}] "
-        f"(n={trio_exacta_25[3]:,})다. 강한 실제 풀 기준선으로 갈수록 효과가 줄어드는 "
-        "comparator ladder로 해석한다.", "",
+        "모든 기준선을 같은 2,312경주에 맞춘다. 쌍승식이 미검열된 exacta+win은 "
+        f"{exacta_available:,}경주로 전체보다 {int(s25['win_harville']['races']) - exacta_available:,}경주 적고, "
+        f"삼복승과 쌍승식이 모두 미검열된 trio+exacta는 {trio_exacta_available:,}경주로 "
+        f"전체보다 {int(s25['win_harville']['races']) - trio_exacta_available:,}경주 적다. "
+        "따라서 아래 절대 지표와 ladder는 표본선택 변화 없이 비교한다. "
+        f"Exacta 가용성 기준 {exacta_exclusions}; trio+exacta 가용성 기준 {trio_exacta_exclusions}이다.", "",
+        "| 모형 | 경주 | 평균 Brier | Brier skill vs 상태균등 | 평균 NLL | 예측순위 중앙 | 상위10% |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        *[
+            f"| {model} | {int(common_s25[model]['races']):,} | {float(common_s25[model]['brier']):.7f} | "
+            f"{'—' if model == 'state_uniform' else f'{common_bskill[model]:.6f}'} | "
+            f"{'∞' if math.isinf(float(common_s25[model]['nll'])) else f'{float(common_s25[model]['nll']):.5f}'} | "
+            f"{float(common_s25[model]['rank']):.3%} | {float(common_s25[model]['top10']):.2%} |"
+            for model in strong_models
+        ], "",
+        "| 공통표본 비교 | trifecta - 기준선 Brier | 95% 날짜-cluster CI | 경주 |",
+        "| --- | ---: | ---: | ---: |",
+        *[
+            f"| {label} | {value[0]:.8f} | [{value[1]:.8f}, {value[2]:.8f}] | {value[3]:,} |"
+            for label, value in ladder_comparisons
+        ], "",
+        f"가장 강한 trio+exacta 비교의 절대 차이는 {abs(ladder_comparisons[-1][1][0]):.8f}이고, "
+        f"95% CI의 0에 가까운 끝점 절대값은 {abs(ladder_comparisons[-1][1][2]):.8f}다. "
+        f"둘 중 작은 값은 미검열 배당 반올림의 보수적 평균 Brier 외부변동 상한 {uncapped_outer:.8f}보다 작다. "
+        "따라서 trio+exacta에 대한 우위의 부호는 전체 반올림 식별불확실성 아래에서 확정되지 않는다. "
+        "확인적 주장은 원래의 단승 Harville 비교에 한정하고, pool-anchored ladder는 사후 진단으로 해석한다.", "",
         "### 출전두수별 이질성", "",
         "각 경주를 동일 가중한 Brier 차이의 추정대상은 수집된 경주의 평균 가격정렬 차이다. "
-        "상태공간 크기에 따른 기계적 차이를 확인하도록 출전두수 구간별로 같은 날짜-cluster bootstrap을 적용했다.", "",
-        "| 출전두수 | trifecta - dual-discounted Harville | 95% 날짜-cluster CI | 경주 |",
-        "| --- | ---: | ---: | ---: |",
-        *[f"| {label} | {value[0]:.8f} | [{value[1]:.8f}, {value[2]:.8f}] | {value[3]:,} |"
-          for label, value in field_comparisons],
+        f"상태공간 크기에 따른 기계적 차이를 확인하되, 날짜 cluster가 {MIN_FIELD_DATE_CLUSTERS}개 미만이면 "
+        "불안정한 bootstrap CI를 제시하지 않는다.", "",
+        "| 출전두수 | trifecta - dual-discounted Harville | 95% 날짜-cluster CI | 경주 | 날짜 cluster | 주석 |",
+        "| --- | ---: | ---: | ---: | ---: | --- |",
+        *field_rows,
         "", "## capped 확률질량 검정", "",
         "경주별 사전 회계 잔여질량 `R/T`를 capped 상태 확률로 놓은 정확한 Poisson-binomial 진단이다. "
         "2025뿐 아니라 모수를 적합하지 않는 동일 검정을 과거와 전체 표본에도 적용한다. 이는 베팅지분을 "
@@ -564,8 +636,10 @@ def build_report(
         "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
         *[f"| {sample} | {scenario} | {x[1]:,} | {x[0]} | {x[2]:.3f} | [{x[3]}, {x[4]}] | {x[5]:.4f} |"
           for (sample, scenario), x in mass_tests.items()],
-        "", "전체 2022--2025 표본에서는 residual_mid와 residual_max가 관측 capped 적중수를 과대예측해 "
-        "각각 5% 수준에서 기각된다. 이는 favourite-longshot 편향과 회계적 잔여질량 과대 중 어느 쪽인지 분리하지 못한다.", "",
+        "", "전체 2022--2025 표본에서는 독립 Bernoulli 가정 아래 residual_mid와 residual_max가 관측 capped 적중수를 "
+        "과대예측한다. 다만 같은 날짜 경주 간 의존성을 반영하지 않은 민감도 진단이므로 해당 p값을 확정적 기각으로 "
+        "해석하지 않는다. residual_min이 관측 적중수에 가장 가깝지만, residual_mid는 회계 식별구간의 중립적 관례로만 "
+        "유지하며 outcome이 지지한 점추정치로 취급하지 않는다.", "",
         "## capped-cell allocation의 adversarial envelope", "",
         "`residual_mid`와 미검열 셀의 정수 완성을 고정하고, `9999.9` 셀 사이의 잔여마권 배분만 모든 허용 정수배분에 "
         "대해 극단화했다. 이는 이전의 residual min/mid/max나 beta=0.10보다 직접적인 allocation 부분식별 진단이다.", "",

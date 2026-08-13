@@ -44,12 +44,12 @@ Brier skill은 상태공간 균등분포 대비 `1 - Brier/model / Brier/uniform
 
 ## 주지표 비교: 날짜 cluster bootstrap
 
-차이는 앞 모형 - 뒤 모형이다. 음수면 앞 모형의 Brier가 더 작다. 2025년 날짜를 cluster로 2,000회 재표집한 95% 구간을 병기한다.
+차이는 앞 모형 - 뒤 모형이다. 음수면 앞 모형의 Brier가 더 작다. 2025년 날짜를 cluster로 10,000회 재표집한 95% 구간을 병기한다.
 
 | 비교 | 평균 Brier 차이 | 95% cluster bootstrap | 경주 |
 | --- | ---: | ---: | ---: |
-| trifecta_uniform - win_harville | -0.00098517 | [-0.00135358, -0.00058067] | 2,426 |
-| trifecta_swapped_23 - trifecta_uniform | 0.00108387 | [0.00056428, 0.00161204] | 2,426 |
+| trifecta_uniform - win_harville | -0.00098517 | [-0.00136726, -0.00059228] | 2,426 |
+| trifecta_swapped_23 - trifecta_uniform | 0.00108387 | [0.00057216, 0.00160883] | 2,426 |
 
 ## 해석 경계
 
