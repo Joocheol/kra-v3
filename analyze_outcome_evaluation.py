@@ -52,6 +52,23 @@ def harville_trifecta(win_odds: dict[int, float]) -> dict[tuple[int, int, int], 
     return {key: value / total for key, value in triples.items()}
 
 
+def fractional_uniform_completion(
+    race: dict, odds: dict[tuple[int, int, int], float],
+    info: dict[str, int], scenario: str,
+) -> dict[tuple[int, int, int], float]:
+    """Remove arbitrary lexicographic tie-breaking among capped cells."""
+    distribution = completed_trifecta(race, odds, info, scenario)
+    capped = [combo for combo, value in odds.items() if value == 9999.9]
+    if capped:
+        total = _won(race["sales"]["삼쌍승식"]) // 100
+        share = info[scenario] / len(capped) / total
+        for combo in capped:
+            distribution[combo] = share
+    if not math.isclose(sum(distribution.values()), 1.0, abs_tol=1e-12):
+        raise AssertionError("fractional completion does not sum to one")
+    return distribution
+
+
 def state_uniform(keys: set[tuple[int, int, int]]) -> dict[tuple[int, int, int], float]:
     value = 1 / len(keys)
     return {key: value for key in keys}
@@ -268,7 +285,7 @@ def make_report(rows: list[dict[str, object]], exclusions: dict[str, int]) -> st
     bdiff = clustered_delta_ci(rows, "trifecta_uniform", "win_harville", "brier")
     sdiff = clustered_delta_ci(rows, "trifecta_swapped_23", "trifecta_uniform", "brier")
     lines.extend([
-        "", "## 사전 지정 비교: 날짜 cluster bootstrap", "",
+        "", "## 주지표 비교: 날짜 cluster bootstrap", "",
         "차이는 앞 모형 - 뒤 모형이다. 음수면 앞 모형의 Brier가 더 작다. 2025년 "
         "날짜를 cluster로 2,000회 재표집한 95% 구간을 병기한다.", "",
         "| 비교 | 평균 Brier 차이 | 95% cluster bootstrap | 경주 |",
@@ -335,7 +352,7 @@ def main() -> int:
             accounting = accounting_outcome_interval(race, market["trifecta"], info, outcome)
             uniform_mid: dict[tuple[int, int, int], float] | None = None
             for scenario in SCENARIOS:
-                completed = completed_trifecta(race, market["trifecta"], info, scenario)
+                completed = fractional_uniform_completion(race, market["trifecta"], info, scenario)
                 rows.append(metric_row(
                     race, "trifecta_uniform", scenario, completed, outcome, accounting
                 ))

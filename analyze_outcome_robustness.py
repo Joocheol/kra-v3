@@ -183,6 +183,31 @@ def exacta_anchored_trifecta(
     return {key: value / total for key, value in triples.items()}
 
 
+def trio_exacta_anchored_trifecta(
+    trio_odds: dict[frozenset[int], float],
+    exacta_odds: dict[tuple[int, int], float],
+    horses: list[int],
+) -> dict[tuple[int, int, int], float]:
+    """Use trio prices for the unordered set and exacta prices for order."""
+    if any(value == 9999.9 for value in trio_odds.values()):
+        raise ValueError("censored trio pool")
+    if any(value == 9999.9 for value in exacta_odds.values()):
+        raise ValueError("censored exacta pool")
+    if set(trio_odds) != {frozenset(x) for x in itertools.combinations(horses, 3)}:
+        raise ValueError("trio support differs")
+    if set(exacta_odds) != set(itertools.permutations(horses, 2)):
+        raise ValueError("exacta support differs")
+    set_probability = norm({key: 1 / value for key, value in trio_odds.items()})
+    pair_weight = {key: 1 / value for key, value in exacta_odds.items()}
+    triples = {}
+    for trio, probability in set_probability.items():
+        orders = list(itertools.permutations(sorted(trio), 3))
+        denom = sum(pair_weight[(a, b)] for a, b, _ in orders)
+        for a, b, c in orders:
+            triples[(a, b, c)] = probability * pair_weight[(a, b)] / denom
+    return triples
+
+
 def poisson_binomial_interval(
     probabilities: list[float], observed: int,
 ) -> tuple[float, int, int, float]:
@@ -405,8 +430,9 @@ def build_report(
     swap_rep = paired_cluster_ci(rows, "trifecta_swapped_23", "trifecta_uniform_fractional", ytrain, "brier", seed_offset=11)
     plain_25 = paired_cluster_ci(rows, "trifecta_uniform_fractional", "win_harville", y25, "brier", seed_offset=12)
     exacta_25 = paired_cluster_ci(rows, "trifecta_uniform_fractional", "exacta_anchored_win_third", y25, "brier", seed_offset=13)
+    trio_exacta_25 = paired_cluster_ci(rows, "trifecta_uniform_fractional", "trio_exacta_anchored", y25, "brier", seed_offset=14)
     field_comparisons = []
-    for label, low_starters, high_starters in (("7--9", 7, 9), ("10--11", 10, 11), ("12--14", 12, 14)):
+    for label, low_starters, high_starters in (("7--9", 7, 9), ("10--11", 10, 11), ("12--14", 12, 14), ("15--16", 15, 16)):
         race_ids = {
             ctx["race"]["race_id"] for ctx in contexts
             if ctx["year"] == "2025"
@@ -421,14 +447,23 @@ def build_report(
             ),
         ))
     y25_contexts = [ctx for ctx in contexts if ctx["year"] == "2025"]
-    observed_caps = sum(int(ctx["outcome_capped"]) for ctx in y25_contexts)
-    mass_tests = {
-        scenario: poisson_binomial_interval(
-            [ctx["info"][scenario] / ctx["info"]["total_tickets"] for ctx in y25_contexts],
-            observed_caps,
-        )
-        for scenario in ("residual_min", "residual_mid", "residual_max")
+    mass_samples = {
+        "2025": y25_contexts,
+        "2022--2024": [ctx for ctx in contexts if ctx["year"] <= "2024"],
+        "2022--2025": contexts,
     }
+    mass_tests = {}
+    for sample, sample_contexts in mass_samples.items():
+        observed = sum(int(ctx["outcome_capped"]) for ctx in sample_contexts)
+        for scenario in ("residual_min", "residual_mid", "residual_max"):
+            probabilities = [
+                ctx["info"][scenario] / ctx["info"]["total_tickets"]
+                for ctx in sample_contexts
+            ]
+            mass_tests[(sample, scenario)] = (
+                observed, len(sample_contexts),
+                *poisson_binomial_interval(probabilities, observed),
+            )
 
     bmin = statistics.mean(x[0] for x in envelopes)
     bmax = statistics.mean(x[1] for x in envelopes)
@@ -445,6 +480,7 @@ def build_report(
         "2025는 원래의 확인표본으로 유지한다. 2022--2024 착순은 원래 삼쌍승 균등완성·일반 Harville·축반전 "
         "모형에 사용된 적이 없으므로 그 세 모형의 retrospective replication으로 보고한다. 동시에 같은 "
         "2022--2024 착순만 사용해 discounted-Harville의 lambda를 적합하고, 그 lambda를 고정해 2025에 적용한다.", "",
+        f"분석 context는 2022--2025년 {len(contexts):,}경주이며 단승 상한가 검열 제외는 {win_censored:,}건이다.", "",
         "## discounted Harville", "",
         f"2·3착 조건부에서 단승 정규화확률을 각각 `p^lambda2`, `p^lambda3`로 할인한다. 둘 다 1이면 일반 Harville이다. "
         f"2022--2024 NLL을 단계별로 최소화한 값은 **lambda2={lam:.3f}, lambda3={lam3:.3f}**다. 훈련 평균 NLL은 "
@@ -483,9 +519,14 @@ def build_report(
         "", f"참고로 원래 2025 trifecta - ordinary Harville Brier 차이는 {plain_25[0]:.8f} "
         f"[{plain_25[1]:.8f}, {plain_25[2]:.8f}]다.", "",
         "## 비-Harville pool 기준선", "",
-        f"미검열 복승식 순서쌍 풀로 1·2착 결합확률을 만들고 단승지분으로 3착만 조건화한 기준선과의 "
+        f"미검열 쌍승식 풀로 1·2착 결합확률을 만들고 단승지분으로 3착만 조건화한 기준선과의 "
         f"2025 공통표본 Brier 차이(trifecta - exacta-anchor)는 {exacta_25[0]:.8f} "
-        f"[{exacta_25[1]:.8f}, {exacta_25[2]:.8f}] (n={exacta_25[3]:,})다. 별도 풀 정보집합 비교다.", "",
+        f"[{exacta_25[1]:.8f}, {exacta_25[2]:.8f}] (n={exacta_25[3]:,})다.", "",
+        f"더 강한 삼복승+쌍승 기준선은 삼복승으로 unordered top-three 집합을 정하고 쌍승으로 "
+        f"집합 안의 1·2착 순서를 배분한다. trifecta - trio+exacta Brier 차이는 "
+        f"{trio_exacta_25[0]:.8f} [{trio_exacta_25[1]:.8f}, {trio_exacta_25[2]:.8f}] "
+        f"(n={trio_exacta_25[3]:,})다. 강한 실제 풀 기준선으로 갈수록 효과가 줄어드는 "
+        "comparator ladder로 해석한다.", "",
         "### 출전두수별 이질성", "",
         "각 경주를 동일 가중한 Brier 차이의 추정대상은 수집된 경주의 평균 가격정렬 차이다. "
         "상태공간 크기에 따른 기계적 차이를 확인하도록 출전두수 구간별로 같은 날짜-cluster bootstrap을 적용했다.", "",
@@ -494,13 +535,13 @@ def build_report(
         *[f"| {label} | {value[0]:.8f} | [{value[1]:.8f}, {value[2]:.8f}] | {value[3]:,} |"
           for label, value in field_comparisons],
         "", "## capped 확률질량 검정", "",
-        f"2025 실현 capped 상태는 {observed_caps:,}/{len(y25_contexts):,}건이다. 경주별 사전 회계 잔여질량 "
-        "`R/T`를 capped 상태 확률로 놓은 정확한 Poisson-binomial 진단이다. 이는 베팅지분을 발생확률로 놓는 "
-        "calibration 가정에 의존하며, 실제 착순이 베팅분포에서 추출됐다는 뜻은 아니다.", "",
-        "| 시나리오 | 기대 적중수 | 95% 예측구간 | 관측수 | 양측 tail p |",
-        "| --- | ---: | ---: | ---: | ---: |",
-        *[f"| {scenario} | {x[0]:.3f} | [{x[1]}, {x[2]}] | {observed_caps} | {x[3]:.4f} |"
-          for scenario, x in mass_tests.items()],
+        "경주별 사전 회계 잔여질량 `R/T`를 capped 상태 확률로 놓은 정확한 Poisson-binomial 진단이다. "
+        "2025뿐 아니라 모수를 적합하지 않는 동일 검정을 과거와 전체 표본에도 적용한다. 이는 베팅지분을 "
+        "발생확률로 놓는 calibration 가정에 의존하며 favourite-longshot 편향과 잔여질량 과대를 분리하지 못한다.", "",
+        "| 표본 | 시나리오 | 경주 | 관측수 | 기대수 | 95% 예측구간 | 양측 tail p |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
+        *[f"| {sample} | {scenario} | {x[1]:,} | {x[0]} | {x[2]:.3f} | [{x[3]}, {x[4]}] | {x[5]:.4f} |"
+          for (sample, scenario), x in mass_tests.items()],
         "", "## capped-cell allocation의 adversarial envelope", "",
         "`residual_mid`와 미검열 셀의 정수 완성을 고정하고, `9999.9` 셀 사이의 잔여마권 배분만 모든 허용 정수배분에 "
         "대해 극단화했다. 이는 이전의 residual min/mid/max나 beta=0.10보다 직접적인 allocation 부분식별 진단이다.", "",
@@ -532,18 +573,17 @@ def build_report(
     lines.extend(["", "## calibration 진단 (2025)", "", "각 경주의 모든 순서상태를 예측확률의 0.5 log10 간격으로 묶고, 그 상태가 실제로 발생한 빈도를 비교한다. "
                   "이는 aggregate proper score가 객관적 확률 정확성을 뜻하지 않는다는 주장 경계를 직접 점검한다.", "",
                   "상태는 경주 안에서 종속이므로 유효 표본은 상태수가 아니라 최대 경주 수다. "
-                  "실현수가 5 미만인 희소 구간은 표에서 억제한다.", "",
+                  "실현수가 5 미만인 희소 구간도 꼬리영역을 숨기지 않도록 표시한다.", "",
                   "| 모형 | 확률 구간 | 상태수 | 실현수 | 평균 예측확률 | 실현빈도 | 실현/예측 |",
                   "| --- | --- | ---: | ---: | ---: | ---: | ---: |"])
     for model in ("trifecta_uniform_fractional", "win_harville_discounted"):
         for bin_name in sorted(calibration[model], key=str):
             count, pred_sum, realized = calibration[model][bin_name]
-            if realized < 5:
-                continue
             meanp = pred_sum / count
             freq = realized / count
             ratio = freq / meanp if meanp > 0 else math.inf
-            lines.append(f"| {model} | {bin_name} | {int(count):,} | {int(realized):,} | {meanp:.8f} | {freq:.8f} | {ratio:.3f} |")
+            sparse = " (희소)" if realized < 5 else ""
+            lines.append(f"| {model} | {bin_name}{sparse} | {int(count):,} | {int(realized):,} | {meanp:.8f} | {freq:.8f} | {ratio:.3f} |")
 
     lines.extend([
         "", "## 해석", "",
@@ -612,7 +652,7 @@ def main() -> int:
             contexts.append({
                 "race": race, "year": race["date"][:4], "info": info,
                 "trifecta_odds": market["trifecta"], "win_odds": market["win"],
-                "exacta_odds": market.get("exacta"),
+                "exacta_odds": market.get("exacta"), "trio_odds": market.get("trio"),
                 "outcome": outcome, "outcome_capped": market["trifecta"][outcome] == 9999.9,
                 "uniform": uniform,
             })
@@ -643,6 +683,17 @@ def main() -> int:
             if set(exacta) != set(uniform):
                 raise AssertionError(f"{ctx['race']['race_id']}: exacta support mismatch")
             distributions["exacta_anchored_win_third"] = exacta
+        if (
+            ctx["exacta_odds"] and ctx["trio_odds"]
+            and not any(value == 9999.9 for value in ctx["exacta_odds"].values())
+            and not any(value == 9999.9 for value in ctx["trio_odds"].values())
+        ):
+            trio_exacta = trio_exacta_anchored_trifecta(
+                ctx["trio_odds"], ctx["exacta_odds"], sorted(ctx["win_odds"])
+            )
+            if set(trio_exacta) != set(uniform):
+                raise AssertionError(f"{ctx['race']['race_id']}: trio+exacta support mismatch")
+            distributions["trio_exacta_anchored"] = trio_exacta
         for model, dist in distributions.items():
             rows.append(row_for_distribution(ctx, model, dist))
         if ctx["year"] == "2025":

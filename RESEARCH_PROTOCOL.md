@@ -140,7 +140,7 @@ O_rma = (1-t_m) S_rm / (100 n_rma),  n_rma > 0
   해석하지 않는다.
 - 실제 착순 평가는 2025년 2,426경주 전부에서 수행하며 제외 0건이다. 삼쌍승
   균등완성과 단승 Harville의 Brier 차이, 2·3착 축 반전과 원래 축의 Brier 차이는
-  날짜를 cluster로 2,000회 재표집한 사전 지정 bootstrap 95% 구간을 보고한다.
+  날짜를 cluster로 2,000회 재표집한 주지표 bootstrap 95% 구간을 보고한다. 외부 사전등록을 입증하지 않으므로 사전등록 분석이라고 부르지 않는다.
 - 2025년 결과에서 `trifecta_uniform - win_harville` 평균 Brier 차이는
   -0.00098517, 95% 날짜-cluster bootstrap은 [-0.00135358, -0.00058067]이다.
   `swapped_23 - uniform`은 0.00108387, 95% 구간은 [0.00056428, 0.00161204]다.
@@ -153,9 +153,9 @@ O_rma = (1-t_m) S_rm / (100 n_rma),  n_rma > 0
 - 착순평가 경주별 16,982행 산출물은 압축을 푼 CSV 내용의 SHA-256
   `c3bc666c1e67f45c3def697bb80b2f4467c37cb97a8d310ef42f5610d202512b`로 고정하고
   CI에서 다시 계산한다.
-- 2022--2024년 NLL로 적합한 discounted-Harville의 `lambda`는 0.740이며,
-  이를 고정한 2025년 `trifecta - discounted Harville` Brier 차이는
-  -0.00061027, 95% 날짜-cluster 구간은 [-0.00098080, -0.00023560]이다.
+- 2022--2024년 NLL로 적합한 dual-discounted Harville의 `lambda2=0.800`,
+  `lambda3=0.675`를 고정한 2025년 `trifecta - discounted Harville` Brier 차이는
+  -0.00060654, 95% 날짜-cluster 구간은 [-0.00097370, -0.00024464]이다.
 - 결과를 사용하지 않은 원래 세 모형의 2022--2024년 7,245경주 복제에서
   `trifecta - ordinary Harville` Brier 차이는 -0.00085216,
   95% 구간은 [-0.00107847, -0.00060932]다.

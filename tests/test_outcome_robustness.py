@@ -8,6 +8,7 @@ from analyze_outcome_robustness import (
     discounted_harville_trifecta,
     exacta_anchored_trifecta,
     poisson_binomial_interval,
+    trio_exacta_anchored_trifecta,
 )
 
 
@@ -43,9 +44,23 @@ class OutcomeRobustnessTests(unittest.TestCase):
         self.assertEqual(len(distribution), 24)
         self.assertAlmostEqual(sum(distribution.values()), 1.0, places=14)
 
+    def test_trio_exacta_anchor_has_complete_support(self):
+        horses = [1, 2, 3, 4]
+        trio = {frozenset(x): float(i + 3) for i, x in enumerate(itertools.combinations(horses, 3))}
+        exacta = {pair: float(i + 2) for i, pair in enumerate(itertools.permutations(horses, 2))}
+        distribution = trio_exacta_anchored_trifecta(trio, exacta, horses)
+        self.assertEqual(len(distribution), 24)
+        self.assertAlmostEqual(sum(distribution.values()), 1.0, places=14)
+
     def test_poisson_binomial_two_fair_coins(self):
         mean, low, high, pvalue = poisson_binomial_interval([.5, .5], 1)
         self.assertEqual((mean, low, high, pvalue), (1.0, 0, 2, 1.0))
+
+    def test_governing_protocol_uses_current_dual_lambda(self):
+        text = open("RESEARCH_PROTOCOL.md", encoding="utf-8").read()
+        self.assertIn("lambda2=0.800", text)
+        self.assertIn("lambda3=0.675", text)
+        self.assertNotIn("lambda`는 0.740", text)
 
     def test_sumsq_extrema_match_exhaustive_integer_boxes(self):
         n, total, lo, hi = 4, 9, 1, 4
