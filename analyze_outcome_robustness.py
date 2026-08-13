@@ -19,12 +19,14 @@ import pathlib
 import statistics
 import tempfile
 from collections import defaultdict
+from decimal import Decimal
 
 import numpy as np
 
 from analyze_cross_market import _won, completed_trifecta, load_race_records
 from analyze_outcome_evaluation import harville_trifecta, score_distribution, state_uniform
 from check_coherence import load_month, norm
+from kra.feasible import displayed_ticket_interval
 
 PRESPEC_SHA = "11fde096566f586eaa58c019b83c8e8ca10ac264"
 PRESPEC_TIME = "2026-08-12T20:55:26Z"
@@ -392,6 +394,23 @@ def capped_allocation_brier_envelope(ctx: dict) -> tuple[float, float, float, fl
     return 1 + min_obj, 1 + max_obj, xlo / total, xhi / total
 
 
+def uncapped_rounding_brier_outer_bound(ctx: dict) -> float:
+    """Outer bound on Brier movement from all uncapped rounding intervals."""
+    sales = _won(ctx["race"]["sales"]["삼쌍승식"])
+    total = sales // 100
+    sumsq_movement = 0.0
+    outcome_movement = 0.0
+    for combo, value in ctx["trifecta_odds"].items():
+        if value == 9999.9:
+            continue
+        candidates = displayed_ticket_interval(sales, Decimal(str(value)))
+        lo, hi = candidates.start, candidates.stop - 1
+        sumsq_movement += (hi * hi - lo * lo) / total**2
+        if combo == ctx["outcome"]:
+            outcome_movement = 2 * (hi - lo) / total
+    return sumsq_movement + outcome_movement
+
+
 def load_winning_trifecta_payouts(path: pathlib.Path) -> dict[str, dict[str, str]]:
     out = {}
     with gzip.open(path, "rt", encoding="utf-8", newline="") as fh:
@@ -432,7 +451,7 @@ def build_report(
     exacta_25 = paired_cluster_ci(rows, "trifecta_uniform_fractional", "exacta_anchored_win_third", y25, "brier", seed_offset=13)
     trio_exacta_25 = paired_cluster_ci(rows, "trifecta_uniform_fractional", "trio_exacta_anchored", y25, "brier", seed_offset=14)
     field_comparisons = []
-    for label, low_starters, high_starters in (("7--9", 7, 9), ("10--11", 10, 11), ("12--14", 12, 14), ("15--16", 15, 16)):
+    for label, low_starters, high_starters in (("7--9", 7, 9), ("10--11", 10, 11), ("12--14", 12, 14), ("15--16", 15, 16), ("17+", 17, 99)):
         race_ids = {
             ctx["race"]["race_id"] for ctx in contexts
             if ctx["year"] == "2025"
@@ -470,6 +489,9 @@ def build_report(
     pmins = [x[2] for x in envelopes]
     pmaxs = [x[3] for x in envelopes]
     discounted_brier = float(s25["win_harville_discounted"]["brier"])
+    uncapped_outer = statistics.mean(
+        uncapped_rounding_brier_outer_bound(ctx) for ctx in y25_contexts
+    )
 
     lines = [
         "# 실제 착순 평가 강건성·외부검증", "",
@@ -542,11 +564,15 @@ def build_report(
         "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
         *[f"| {sample} | {scenario} | {x[1]:,} | {x[0]} | {x[2]:.3f} | [{x[3]}, {x[4]}] | {x[5]:.4f} |"
           for (sample, scenario), x in mass_tests.items()],
-        "", "## capped-cell allocation의 adversarial envelope", "",
+        "", "전체 2022--2025 표본에서는 residual_mid와 residual_max가 관측 capped 적중수를 과대예측해 "
+        "각각 5% 수준에서 기각된다. 이는 favourite-longshot 편향과 회계적 잔여질량 과대 중 어느 쪽인지 분리하지 못한다.", "",
+        "## capped-cell allocation의 adversarial envelope", "",
         "`residual_mid`와 미검열 셀의 정수 완성을 고정하고, `9999.9` 셀 사이의 잔여마권 배분만 모든 허용 정수배분에 "
         "대해 극단화했다. 이는 이전의 residual min/mid/max나 beta=0.10보다 직접적인 allocation 부분식별 진단이다.", "",
         f"이 경계는 `residual_mid`와 한 가지 미검열 정수완성을 고정한 조건부 경계이며 joint envelope가 아니다. "
-        f"2025 평균 Brier의 가능한 범위는 **{bmin:.7f}--{bmax:.7f}**다. 같은 표본의 discounted-Harville 평균 Brier는 "
+        f"2025 평균 Brier의 가능한 범위는 **{bmin:.7f}--{bmax:.7f}**다. 미검열 셀의 모든 표시배당 "
+        f"반올림구간을 독립적으로 움직인 보수적 평균 Brier 외부변동 상한은 **{uncapped_outer:.8f}**다. "
+        f"이 외부경계는 풀합 제약을 무시해 실제 joint identified set보다 넓다. 같은 표본의 discounted-Harville 평균 Brier는 "
         f"**{discounted_brier:.7f}**다. 따라서 " + ("가장 불리한 capped 배분에서도 삼쌍승 Brier가 더 낮다." if bmax < discounted_brier else "capped 배분의 최악경계에서는 discounted-Harville 우위를 배제할 수 없다.") , "",
         f"실현상태 확률의 accounting-allocation 하한이 0인 경주는 {sum(p == 0 for p in pmins):,}/{len(pmins):,}개다. "
         "따라서 log score의 완전한 adversarial 최악경계는 이 경주가 하나라도 있으면 무한대이며, NLL에 대해서는 "
