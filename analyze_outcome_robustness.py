@@ -405,6 +405,21 @@ def build_report(
     swap_rep = paired_cluster_ci(rows, "trifecta_swapped_23", "trifecta_uniform_fractional", ytrain, "brier", seed_offset=11)
     plain_25 = paired_cluster_ci(rows, "trifecta_uniform_fractional", "win_harville", y25, "brier", seed_offset=12)
     exacta_25 = paired_cluster_ci(rows, "trifecta_uniform_fractional", "exacta_anchored_win_third", y25, "brier", seed_offset=13)
+    field_comparisons = []
+    for label, low_starters, high_starters in (("7--9", 7, 9), ("10--11", 10, 11), ("12--14", 12, 14)):
+        race_ids = {
+            ctx["race"]["race_id"] for ctx in contexts
+            if ctx["year"] == "2025"
+            and low_starters <= len(set(ctx["race"]["horses"]) - set(ctx["race"].get("scratched") or [])) <= high_starters
+        }
+        subset = [row for row in rows if row["race_id"] in race_ids]
+        field_comparisons.append((
+            label,
+            paired_cluster_ci(
+                subset, "trifecta_uniform_fractional", "win_harville_discounted",
+                y25, "brier", seed_offset=20 + low_starters,
+            ),
+        ))
     y25_contexts = [ctx for ctx in contexts if ctx["year"] == "2025"]
     observed_caps = sum(int(ctx["outcome_capped"]) for ctx in y25_contexts)
     mass_tests = {
@@ -471,7 +486,14 @@ def build_report(
         f"미검열 복승식 순서쌍 풀로 1·2착 결합확률을 만들고 단승지분으로 3착만 조건화한 기준선과의 "
         f"2025 공통표본 Brier 차이(trifecta - exacta-anchor)는 {exacta_25[0]:.8f} "
         f"[{exacta_25[1]:.8f}, {exacta_25[2]:.8f}] (n={exacta_25[3]:,})다. 별도 풀 정보집합 비교다.", "",
-        "## capped 확률질량 검정", "",
+        "### 출전두수별 이질성", "",
+        "각 경주를 동일 가중한 Brier 차이의 추정대상은 수집된 경주의 평균 가격정렬 차이다. "
+        "상태공간 크기에 따른 기계적 차이를 확인하도록 출전두수 구간별로 같은 날짜-cluster bootstrap을 적용했다.", "",
+        "| 출전두수 | trifecta - dual-discounted Harville | 95% 날짜-cluster CI | 경주 |",
+        "| --- | ---: | ---: | ---: |",
+        *[f"| {label} | {value[0]:.8f} | [{value[1]:.8f}, {value[2]:.8f}] | {value[3]:,} |"
+          for label, value in field_comparisons],
+        "", "## capped 확률질량 검정", "",
         f"2025 실현 capped 상태는 {observed_caps:,}/{len(y25_contexts):,}건이다. 경주별 사전 회계 잔여질량 "
         "`R/T`를 capped 상태 확률로 놓은 정확한 Poisson-binomial 진단이다. 이는 베팅지분을 발생확률로 놓는 "
         "calibration 가정에 의존하며, 실제 착순이 베팅분포에서 추출됐다는 뜻은 아니다.", "",
@@ -509,15 +531,19 @@ def build_report(
 
     lines.extend(["", "## calibration 진단 (2025)", "", "각 경주의 모든 순서상태를 예측확률의 0.5 log10 간격으로 묶고, 그 상태가 실제로 발생한 빈도를 비교한다. "
                   "이는 aggregate proper score가 객관적 확률 정확성을 뜻하지 않는다는 주장 경계를 직접 점검한다.", "",
-                  "| 모형 | 확률 구간 | 상태수 | 평균 예측확률 | 실현빈도 | 실현/예측 |",
-                  "| --- | --- | ---: | ---: | ---: | ---: |"])
+                  "상태는 경주 안에서 종속이므로 유효 표본은 상태수가 아니라 최대 경주 수다. "
+                  "실현수가 5 미만인 희소 구간은 표에서 억제한다.", "",
+                  "| 모형 | 확률 구간 | 상태수 | 실현수 | 평균 예측확률 | 실현빈도 | 실현/예측 |",
+                  "| --- | --- | ---: | ---: | ---: | ---: | ---: |"])
     for model in ("trifecta_uniform_fractional", "win_harville_discounted"):
         for bin_name in sorted(calibration[model], key=str):
             count, pred_sum, realized = calibration[model][bin_name]
+            if realized < 5:
+                continue
             meanp = pred_sum / count
             freq = realized / count
             ratio = freq / meanp if meanp > 0 else math.inf
-            lines.append(f"| {model} | {bin_name} | {int(count):,} | {meanp:.8f} | {freq:.8f} | {ratio:.3f} |")
+            lines.append(f"| {model} | {bin_name} | {int(count):,} | {int(realized):,} | {meanp:.8f} | {freq:.8f} | {ratio:.3f} |")
 
     lines.extend([
         "", "## 해석", "",
