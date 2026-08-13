@@ -1,4 +1,5 @@
 name: Commit Claude round-2 outcome artifacts
+# One-shot artifact synchronizer; remove after the bot commit.
 
 on:
   push:
