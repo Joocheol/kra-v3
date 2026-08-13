@@ -219,7 +219,7 @@ def make_report(rows: list[dict[str, object]], exclusions: dict[str, int]) -> st
         f"2025년 분석 가능 경주는 {len(_model_rows(rows, 'trifecta_uniform')):,}개다. "
         f"제외는 도착마번 부족 {exclusions.get('arrival', 0):,}건, 시장/회계자료 부족 "
         f"{exclusions.get('market', 0):,}건, 활성마와 착순 불일치 "
-        f"{exclusions.get('outcome', 0):,}건이다.", "",
+        f"{exclusions.get('outcome', 0):,}건, 단승 상한가 검열 {exclusions.get('win_censored', 0):,}건이다.", "",
         "## 2025년 주결과 (`R` 중간값)", "",
         "| 모형 | 경주 | 0확률 | 평균 NLL | 실현확률 기하평균 | 평균 Brier | 예측순위 중앙 | 상위 1% | 상위 10% |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -276,7 +276,8 @@ def make_report(rows: list[dict[str, object]], exclusions: dict[str, int]) -> st
         f"| trifecta_uniform - win_harville | {bdiff[0]:.8f} | [{bdiff[1]:.8f}, {bdiff[2]:.8f}] | {bdiff[3]:,} |",
         f"| trifecta_swapped_23 - trifecta_uniform | {sdiff[0]:.8f} | [{sdiff[1]:.8f}, {sdiff[2]:.8f}] | {sdiff[3]:,} |",
         "", "## 해석 경계", "",
-        "여기서는 가격표를 정규화한 베팅지분을 확률예측처럼 채점한다. 따라서 좋은 "
+        "실현 capped 상태가 8건뿐이므로 이 단계는 상한 복원 자체보다 대부분 미검열된 삼쌍승 가격표·풀 정보의 "
+        "착순 정렬 평가다. 여기서는 가격표를 정규화한 베팅지분을 확률예측처럼 채점한다. 따라서 좋은 "
         "proper score는 실현 착순과 가격이 더 잘 정렬된다는 뜻이지, 시장이 객관적 "
         "확률을 정확히 안다거나 효율적이라는 인과적 결론이 아니다. 저장된 `arrival`은 "
         "선형 순서만 보존하므로 공동착 구조를 별도로 복원하지 못한다. 검열 셀 사이의 "
@@ -318,6 +319,9 @@ def main() -> int:
             info = feasible.get(race_id)
             if market is None or info is None or not market["trifecta"] or not market["win"]:
                 exclusions["market"] += 1
+                continue
+            if any(value == 9999.9 for value in market["win"].values()):
+                exclusions["win_censored"] += 1
                 continue
             active = set(race["horses"]) - set(race.get("scratched") or [])
             outcome = tuple(race["arrival"][:3])

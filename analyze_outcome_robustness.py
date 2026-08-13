@@ -91,61 +91,116 @@ def fractional_uniform_completion(
 
 
 def discounted_harville_trifecta(
-    win_odds: dict[int, float], lam: float
+    win_odds: dict[int, float], lam2: float, lam3: float | None = None,
 ) -> dict[tuple[int, int, int], float]:
-    """Harville with p**lambda discounting at the 2nd/3rd conditional stages.
-
-    lambda=1 exactly recovers ordinary Harville.  The first-place marginal
-    remains the normalized win-price distribution.
-    """
-    if lam <= 0:
-        raise ValueError("lambda must be positive")
+    """Harville with separately discounted second and third stages."""
+    lam3 = lam2 if lam3 is None else lam3
+    if lam2 <= 0 or lam3 <= 0:
+        raise ValueError("lambdas must be positive")
     p = norm({horse: 1 / value for horse, value in win_odds.items()})
-    q = {horse: p[horse] ** lam for horse in p}
-    triples: dict[tuple[int, int, int], float] = {}
+    q2 = {horse: p[horse] ** lam2 for horse in p}
+    q3 = {horse: p[horse] ** lam3 for horse in p}
+    triples = {}
     for a, b, c in itertools.permutations(sorted(p), 3):
-        d2 = sum(q[h] for h in p if h != a)
-        d3 = sum(q[h] for h in p if h not in (a, b))
-        if d2 <= 0 or d3 <= 0:
-            raise ValueError("invalid discounted-Harville denominator")
-        triples[(a, b, c)] = p[a] * q[b] / d2 * q[c] / d3
+        d2 = sum(q2[h] for h in p if h != a)
+        d3 = sum(q3[h] for h in p if h not in (a, b))
+        triples[(a, b, c)] = p[a] * q2[b] / d2 * q3[c] / d3
     total = sum(triples.values())
     return {key: value / total for key, value in triples.items()}
 
 
 def discounted_outcome_nll(
-    win_odds: dict[int, float], outcome: tuple[int, int, int], lam: float
+    win_odds: dict[int, float], outcome: tuple[int, int, int],
+    lam2: float, lam3: float | None = None,
 ) -> float:
+    lam3 = lam2 if lam3 is None else lam3
     p = norm({horse: 1 / value for horse, value in win_odds.items()})
     a, b, c = outcome
-    q = {horse: p[horse] ** lam for horse in p}
-    d2 = sum(q[h] for h in p if h != a)
-    d3 = sum(q[h] for h in p if h not in (a, b))
-    prob = p[a] * q[b] / d2 * q[c] / d3
+    q2 = {horse: p[horse] ** lam2 for horse in p}
+    q3 = {horse: p[horse] ** lam3 for horse in p}
+    prob = (
+        p[a]
+        * q2[b] / sum(q2[h] for h in p if h != a)
+        * q3[c] / sum(q3[h] for h in p if h not in (a, b))
+    )
     return -math.log(prob)
 
 
-def fit_discount_lambda(contexts: list[dict]) -> tuple[float, float, float]:
+def _stage_nll(ctx: dict, lam: float, stage: int) -> float:
+    p = norm({horse: 1 / value for horse, value in ctx["win_odds"].items()})
+    a, b, c = ctx["outcome"]
+    q = {horse: p[horse] ** lam for horse in p}
+    if stage == 2:
+        return -math.log(q[b] / sum(q[h] for h in p if h != a))
+    if stage == 3:
+        return -math.log(q[c] / sum(q[h] for h in p if h not in (a, b)))
+    raise ValueError("stage must be 2 or 3")
+
+
+def fit_discount_lambdas(contexts: list[dict]) -> tuple[float, float, float, float]:
     train = [ctx for ctx in contexts if ctx["year"] <= "2024"]
-    if not train:
-        raise ValueError("no training outcomes for discounted Harville")
     ordinary = statistics.mean(
-        discounted_outcome_nll(ctx["win_odds"], ctx["outcome"], 1.0)
+        discounted_outcome_nll(ctx["win_odds"], ctx["outcome"], 1.0, 1.0)
         for ctx in train
     )
-    n_steps = int(round((LAMBDA_MAX - LAMBDA_MIN) / LAMBDA_STEP))
-    candidates = [LAMBDA_MIN + i * LAMBDA_STEP for i in range(n_steps + 1)]
-    scored = []
-    for lam in candidates:
-        nll = statistics.mean(
-            discounted_outcome_nll(ctx["win_odds"], ctx["outcome"], lam)
-            for ctx in train
-        )
-        scored.append((nll, lam))
-    best_nll, best = min(scored, key=lambda item: (item[0], item[1]))
-    if math.isclose(best, LAMBDA_MIN) or math.isclose(best, LAMBDA_MAX):
-        raise ValueError(f"discount lambda optimum hit grid boundary: {best}")
-    return best, ordinary, best_nll
+    steps = int(round((LAMBDA_MAX - LAMBDA_MIN) / LAMBDA_STEP))
+    candidates = [LAMBDA_MIN + i * LAMBDA_STEP for i in range(steps + 1)]
+    fitted = {}
+    for stage in (2, 3):
+        scored = [
+            (statistics.mean(_stage_nll(ctx, lam, stage) for ctx in train), lam)
+            for lam in candidates
+        ]
+        fitted[stage] = min(scored, key=lambda item: (item[0], item[1]))[1]
+        if fitted[stage] in (LAMBDA_MIN, LAMBDA_MAX):
+            raise ValueError(f"stage-{stage} optimum hit grid boundary")
+    fitted_nll = statistics.mean(
+        discounted_outcome_nll(
+            ctx["win_odds"], ctx["outcome"], fitted[2], fitted[3]
+        ) for ctx in train
+    )
+    return fitted[2], fitted[3], ordinary, fitted_nll
+
+
+def exacta_anchored_trifecta(
+    exacta_odds: dict[tuple[int, int], float], win_odds: dict[int, float],
+) -> dict[tuple[int, int, int], float]:
+    """Use exacta prices for first-two order and win prices only for third."""
+    if any(value == 9999.9 for value in exacta_odds.values()):
+        raise ValueError("censored exacta pool")
+    horses = sorted(win_odds)
+    if set(exacta_odds) != set(itertools.permutations(horses, 2)):
+        raise ValueError("exacta and win supports differ")
+    pair = norm({key: 1 / value for key, value in exacta_odds.items()})
+    pwin = norm({horse: 1 / value for horse, value in win_odds.items()})
+    triples = {}
+    for (a, b), pair_probability in pair.items():
+        denom = sum(pwin[h] for h in horses if h not in (a, b))
+        for c in horses:
+            if c not in (a, b):
+                triples[(a, b, c)] = pair_probability * pwin[c] / denom
+    total = sum(triples.values())
+    return {key: value / total for key, value in triples.items()}
+
+
+def poisson_binomial_interval(
+    probabilities: list[float], observed: int,
+) -> tuple[float, int, int, float]:
+    """Exact Poisson-binomial mean, central 95% interval and two-sided tail."""
+    pmf = np.zeros(len(probabilities) + 1)
+    pmf[0] = 1.0
+    for i, probability in enumerate(probabilities):
+        if not 0 <= probability <= 1:
+            raise ValueError("probability outside [0, 1]")
+        old = pmf[:i + 1].copy()
+        pmf[:i + 2] = 0
+        pmf[:i + 1] += old * (1 - probability)
+        pmf[1:i + 2] += old * probability
+    cdf = np.cumsum(pmf)
+    low = int(np.searchsorted(cdf, .025))
+    high = int(np.searchsorted(cdf, .975))
+    pvalue = min(1.0, 2 * min(float(cdf[observed]), float(pmf[observed:].sum())))
+    return float(sum(probabilities)), low, high, pvalue
 
 
 def row_for_distribution(ctx: dict, model: str, distribution: dict) -> dict[str, object]:
@@ -333,6 +388,7 @@ def build_report(
     train_plain_nll: float, train_discount_nll: float,
     direct_caps: list[dict[str, object]], envelopes: list[tuple[float, float, float, float]],
     calibration: dict[str, dict[str, list[float]]],
+    lam3: float, win_censored: int,
 ) -> str:
     y25 = {"2025"}
     ytrain = {"2022", "2023", "2024"}
@@ -348,6 +404,16 @@ def build_report(
     plain_rep = paired_cluster_ci(rows, "trifecta_uniform_fractional", "win_harville", ytrain, "brier", seed_offset=10)
     swap_rep = paired_cluster_ci(rows, "trifecta_swapped_23", "trifecta_uniform_fractional", ytrain, "brier", seed_offset=11)
     plain_25 = paired_cluster_ci(rows, "trifecta_uniform_fractional", "win_harville", y25, "brier", seed_offset=12)
+    exacta_25 = paired_cluster_ci(rows, "trifecta_uniform_fractional", "exacta_anchored_win_third", y25, "brier", seed_offset=13)
+    y25_contexts = [ctx for ctx in contexts if ctx["year"] == "2025"]
+    observed_caps = sum(int(ctx["outcome_capped"]) for ctx in y25_contexts)
+    mass_tests = {
+        scenario: poisson_binomial_interval(
+            [ctx["info"][scenario] / ctx["info"]["total_tickets"] for ctx in y25_contexts],
+            observed_caps,
+        )
+        for scenario in ("residual_min", "residual_mid", "residual_max")
+    }
 
     bmin = statistics.mean(x[0] for x in envelopes)
     bmax = statistics.mean(x[1] for x in envelopes)
@@ -358,15 +424,15 @@ def build_report(
     lines = [
         "# 실제 착순 평가 강건성·외부검증", "",
         "## 검토 후 설계 보강", "",
-        f"최초 착순평가 코드는 `{PRESPEC_SHA}` ({PRESPEC_TIME})에 커밋됐고, 최초 수치 결과 보고서는 "
-        f"`{FIRST_RESULTS_SHA}` ({FIRST_RESULTS_TIME})에 커밋됐다. 따라서 아래 추가 분석은 Claude 1차 검토 뒤의 "
-        "명시적 사후 강건성 분석이며, 원래 2025 Brier 비교와 구분한다.", "",
+        f"착순평가 점수 코드는 `{PRESPEC_SHA}` ({PRESPEC_TIME})에 커밋됐고 최초 수치 보고서는 "
+        f"`{FIRST_RESULTS_SHA}` ({FIRST_RESULTS_TIME})에 커밋됐다. 이 기록은 코드가 결과 보고서보다 앞섰음만 "
+        "보이며 외부 사전등록을 입증하지 않는다. 아래는 명시적 사후 강건성 분석이다.", "",
         "2025는 원래의 확인표본으로 유지한다. 2022--2024 착순은 원래 삼쌍승 균등완성·일반 Harville·축반전 "
         "모형에 사용된 적이 없으므로 그 세 모형의 retrospective replication으로 보고한다. 동시에 같은 "
         "2022--2024 착순만 사용해 discounted-Harville의 lambda를 적합하고, 그 lambda를 고정해 2025에 적용한다.", "",
         "## discounted Harville", "",
-        f"2·3착 조건부에서 단승 정규화확률을 `p^lambda`로 할인한다. lambda=1은 일반 Harville이다. "
-        f"2022--2024 NLL을 최소화하는 고정 격자 추정값은 **lambda={lam:.3f}**다. 훈련 평균 NLL은 "
+        f"2·3착 조건부에서 단승 정규화확률을 각각 `p^lambda2`, `p^lambda3`로 할인한다. 둘 다 1이면 일반 Harville이다. "
+        f"2022--2024 NLL을 단계별로 최소화한 값은 **lambda2={lam:.3f}, lambda3={lam3:.3f}**다. 훈련 평균 NLL은 "
         f"일반 Harville {train_plain_nll:.5f}, discounted {train_discount_nll:.5f}다.", "",
         "## 2025 확인표본", "",
         "| 모형 | 경주 | 평균 Brier | Brier skill vs 상태균등 | 평균 NLL | 예측순위 중앙 | 상위10% |",
@@ -401,9 +467,22 @@ def build_report(
         f"| swapped23 - trifecta | {swap_rep[0]:.8f} | [{swap_rep[1]:.8f}, {swap_rep[2]:.8f}] | {swap_rep[3]:,} |",
         "", f"참고로 원래 2025 trifecta - ordinary Harville Brier 차이는 {plain_25[0]:.8f} "
         f"[{plain_25[1]:.8f}, {plain_25[2]:.8f}]다.", "",
-        "## capped-cell allocation의 adversarial envelope", "",
+        "## 비-Harville pool 기준선", "",
+        f"미검열 복승식 순서쌍 풀로 1·2착 결합확률을 만들고 단승지분으로 3착만 조건화한 기준선과의 "
+        f"2025 공통표본 Brier 차이(trifecta - exacta-anchor)는 {exacta_25[0]:.8f} "
+        f"[{exacta_25[1]:.8f}, {exacta_25[2]:.8f}] (n={exacta_25[3]:,})다. 별도 풀 정보집합 비교다.", "",
+        "## capped 확률질량 검정", "",
+        f"2025 실현 capped 상태는 {observed_caps:,}/{len(y25_contexts):,}건이다. 경주별 사전 회계 잔여질량 "
+        "`R/T`를 capped 상태 확률로 놓은 정확한 Poisson-binomial 진단이다. 이는 베팅지분을 발생확률로 놓는 "
+        "calibration 가정에 의존하며, 실제 착순이 베팅분포에서 추출됐다는 뜻은 아니다.", "",
+        "| 시나리오 | 기대 적중수 | 95% 예측구간 | 관측수 | 양측 tail p |",
+        "| --- | ---: | ---: | ---: | ---: |",
+        *[f"| {scenario} | {x[0]:.3f} | [{x[1]}, {x[2]}] | {observed_caps} | {x[3]:.4f} |"
+          for scenario, x in mass_tests.items()],
+        "", "## capped-cell allocation의 adversarial envelope", "",
         "`residual_mid`와 미검열 셀의 정수 완성을 고정하고, `9999.9` 셀 사이의 잔여마권 배분만 모든 허용 정수배분에 "
         "대해 극단화했다. 이는 이전의 residual min/mid/max나 beta=0.10보다 직접적인 allocation 부분식별 진단이다.", "",
+        f"이 경계는 `residual_mid`와 한 가지 미검열 정수완성을 고정한 조건부 경계이며 joint envelope가 아니다. "
         f"2025 평균 Brier의 가능한 범위는 **{bmin:.7f}--{bmax:.7f}**다. 같은 표본의 discounted-Harville 평균 Brier는 "
         f"**{discounted_brier:.7f}**다. 따라서 " + ("가장 불리한 capped 배분에서도 삼쌍승 Brier가 더 낮다." if bmax < discounted_brier else "capped 배분의 최악경계에서는 discounted-Harville 우위를 배제할 수 없다.") , "",
         f"실현상태 확률의 accounting-allocation 하한이 0인 경주는 {sum(p == 0 for p in pmins):,}/{len(pmins):,}개다. "
@@ -412,17 +491,21 @@ def build_report(
         "## 실제 `9999.9` 적중 8건의 외부 지급배당 대조", "",
         "이 진단은 결과를 본 뒤 KRA 지급배당을 사용하므로 2025 proper-score 비교에는 절대 되먹이지 않는다. 또한 "
         "당첨된 capped 셀만 관측되는 선택표본이므로 전체 capped 셀의 대표 정확도로 해석하지 않는다.", "",
-        "| race_id | 실제 배당 | 지급식 n 구간 | 지급식 n | 균등완성 배정마권 | 오차(식별 시) |",
-        "| --- | ---: | ---: | ---: | ---: | ---: |",
+        "| race_id | 실제 배당 | 지급식 n 구간 | 지급식 n | 균등완성 배정마권 | 오차 | 상대오차 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ])
     for d in direct_caps:
         actual = "—" if d["ticket_count"] is None else str(d["ticket_count"])
         err = "—" if d["error"] is None else f"{d['error']:.3f}"
-        lines.append(f"| {d['race_id']} | {d['actual_odds']} | {d['ticket_min']}--{d['ticket_max']} | {actual} | {d['model_tickets']:.3f} | {err} |")
+        rel = "—" if d["relative_error"] is None else f"{d['relative_error']:.1%}"
+        lines.append(f"| {d['race_id']} | {d['actual_odds']} | {d['ticket_min']}--{d['ticket_max']} | {actual} | {d['model_tickets']:.3f} | {err} | {rel} |")
     identified = [d for d in direct_caps if d["error"] is not None]
     if identified:
         mae = statistics.mean(abs(float(d["error"])) for d in identified)
-        lines.extend(["", f"지급식으로 n이 한 값으로 식별된 {len(identified)}/{len(direct_caps)}건에서 균등완성 배정마권의 평균 절대오차는 {mae:.3f}장이다."])
+        rels = [abs(float(d["relative_error"])) for d in identified]
+        lines.extend(["", f"지급식으로 n이 한 값으로 식별된 {len(identified)}/{len(direct_caps)}건에서 평균 절대오차는 {mae:.3f}장, "
+                      f"절대 상대오차 중앙값은 {statistics.median(rels):.1%}, 최댓값은 {max(rels):.1%}다. "
+                      "payout 존재는 기계적으로 n>=1이므로 n=0 셀에는 정보를 주지 않는다."])
 
     lines.extend(["", "## calibration 진단 (2025)", "", "각 경주의 모든 순서상태를 예측확률의 0.5 log10 간격으로 묶고, 그 상태가 실제로 발생한 빈도를 비교한다. "
                   "이는 aggregate proper score가 객관적 확률 정확성을 뜻하지 않는다는 주장 경계를 직접 점검한다.", "",
@@ -440,7 +523,8 @@ def build_report(
         "", "## 해석", "",
         "이 추가 분석은 Claude 1차 검토 이후 수행한 강건성 분석이다. discounted-Harville은 알려진 순차조건부 기능형식 "
         "오류와 풀 간 정보차이를 분리하기 위한 더 강한 기준선이다. 2022--2024 복제와 2025 확인표본의 구분, 실제 capped "
-        "당첨의 외부대조, allocation envelope, calibration을 함께 보고한다. 어느 결과도 공제 후 수익성, 시장효율성, "
+        "당첨의 외부대조, allocation envelope, calibration을 함께 보고한다. 최초 Brier 비교 외 지표는 다중비교 "
+        "보정 없는 기술적·사후 진단이다. 어느 결과도 공제 후 수익성, 시장효율성, "
         "참확률의 정확성 또는 인과효과를 직접 식별하지 않는다.", "",
     ])
     return "\n".join(lines)
@@ -456,6 +540,7 @@ def main() -> int:
     records = load_race_records(args.data / "races.jsonl.gz")
     feasible = load_feasible_extended(args.data / "trifecta_feasible_sets.csv.gz")
     contexts: list[dict] = []
+    win_censored = 0
     months = sorted({race["date"][:7] for race in records.values()})
     for idx, month in enumerate(months, 1):
         print(f"outcome robustness {idx}/{len(months)}: {month}", flush=True)
@@ -465,6 +550,9 @@ def main() -> int:
             info = feasible.get(race_id)
             market = markets.get(race_id)
             if info is None or market is None or not market["trifecta"] or not market["win"]:
+                continue
+            if any(value == 9999.9 for value in market["win"].values()):
+                win_censored += 1
                 continue
             arrival = race.get("arrival") or []
             if len(arrival) < 3:
@@ -498,12 +586,13 @@ def main() -> int:
             contexts.append({
                 "race": race, "year": race["date"][:4], "info": info,
                 "trifecta_odds": market["trifecta"], "win_odds": market["win"],
+                "exacta_odds": market.get("exacta"),
                 "outcome": outcome, "outcome_capped": market["trifecta"][outcome] == 9999.9,
                 "uniform": uniform,
             })
 
-    lam, train_plain_nll, train_discount_nll = fit_discount_lambda(contexts)
-    print(f"DISCOUNT_LAMBDA {lam:.3f} train_plain_nll={train_plain_nll:.8f} train_discount_nll={train_discount_nll:.8f}")
+    lam, lam3, train_plain_nll, train_discount_nll = fit_discount_lambdas(contexts)
+    print(f"DISCOUNT_LAMBDAS second={lam:.3f} third={lam3:.3f} train_plain_nll={train_plain_nll:.8f} train_discount_nll={train_discount_nll:.8f}")
 
     rows: list[dict[str, object]] = []
     calibration: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(lambda: [0.0, 0.0, 0.0]))
@@ -512,7 +601,7 @@ def main() -> int:
         uniform = ctx["uniform"]
         swapped = {(a, c, b): p for (a, b, c), p in uniform.items()}
         ordinary = harville_trifecta(ctx["win_odds"])
-        discounted = discounted_harville_trifecta(ctx["win_odds"], lam)
+        discounted = discounted_harville_trifecta(ctx["win_odds"], lam, lam3)
         state = state_uniform(set(uniform))
         if not (set(uniform) == set(ordinary) == set(discounted) == set(state)):
             raise AssertionError(f"{ctx['race']['race_id']}: comparator support mismatch")
@@ -523,6 +612,11 @@ def main() -> int:
             "win_harville_discounted": discounted,
             "state_uniform": state,
         }
+        if ctx["exacta_odds"] and not any(value == 9999.9 for value in ctx["exacta_odds"].values()):
+            exacta = exacta_anchored_trifecta(ctx["exacta_odds"], ctx["win_odds"])
+            if set(exacta) != set(uniform):
+                raise AssertionError(f"{ctx['race']['race_id']}: exacta support mismatch")
+            distributions["exacta_anchored_win_third"] = exacta
         for model, dist in distributions.items():
             rows.append(row_for_distribution(ctx, model, dist))
         if ctx["year"] == "2025":
@@ -558,6 +652,7 @@ def main() -> int:
             "ticket_count": count,
             "model_tickets": model_tickets,
             "error": None if count is None else model_tickets - count,
+            "relative_error": None if count is None else (model_tickets - count) / count,
         })
     if len(direct_caps) != len(capped_2025):
         raise AssertionError("not all realized capped states cross-linked")
@@ -565,10 +660,10 @@ def main() -> int:
     write_csv_gz(args.out, rows)
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(
-        build_report(rows, contexts, lam, train_plain_nll, train_discount_nll, direct_caps, envelopes, calibration),
+        build_report(rows, contexts, lam, train_plain_nll, train_discount_nll, direct_caps, envelopes, calibration, lam3, win_censored),
         encoding="utf-8",
     )
-    print(f"OUTCOME_ROBUSTNESS contexts={len(contexts)} rows={len(rows)} capped_2025={len(capped_2025)}")
+    print(f"OUTCOME_ROBUSTNESS contexts={len(contexts)} rows={len(rows)} capped_2025={len(capped_2025)} win_censored={win_censored}")
     print(f"wrote {args.out}")
     print(f"wrote {args.report}")
     return 0

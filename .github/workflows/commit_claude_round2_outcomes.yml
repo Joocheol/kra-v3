@@ -1,0 +1,35 @@
+name: Commit Claude round-2 outcome artifacts
+
+on:
+  push:
+    branches: [agent/outcome-evaluation]
+
+permissions:
+  contents: write
+
+jobs:
+  freeze:
+    if: github.event.head_commit.message == 'Address Claude outcome power review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: agent/outcome-evaluation
+          fetch-depth: 1
+          persist-credentials: true
+      - run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
+      - name: Reproduce outcome artifacts
+        run: |
+          python3 -m unittest discover -s tests -v
+          python3 analyze_outcome_evaluation.py
+          sha256sum 데이터/outcome_evaluation.csv.gz | cut -d ' ' -f1 > 데이터/outcome_evaluation.sha256
+          python3 analyze_outcome_robustness.py
+      - name: Commit frozen artifacts
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add findings/outcome_evaluation.md findings/outcome_robustness.md
+          git add -f 데이터/outcome_evaluation.csv.gz 데이터/outcome_evaluation.sha256 데이터/outcome_robustness.csv.gz
+          git commit -m 'Freeze Claude round-2 outcome artifacts'
+          git push origin HEAD:agent/outcome-evaluation
