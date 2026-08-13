@@ -6,7 +6,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   outcome-evaluation:
@@ -108,22 +108,3 @@ jobs:
           findings/snapshot_timing.md
 
 
-  freeze-claude-round2b:
-    if: github.event_name == 'pull_request' && github.head_ref == 'agent/outcome-evaluation'
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: agent/outcome-evaluation
-          fetch-depth: 1
-          persist-credentials: true
-      - run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
-      - name: Reproduce and freeze robustness report
-        run: |
-          python3 analyze_outcome_robustness.py
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add findings/outcome_robustness.md
-          git commit -m 'Freeze outcome heterogeneity report'
-          git push origin HEAD:agent/outcome-evaluation
