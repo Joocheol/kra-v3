@@ -128,6 +128,18 @@ jobs:
       - name: Recompute validation with symmetric hidden bounds
         run: python3 analyze_rank_profile_correction.py
 
+  power-law-rank-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install analysis dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
+      - name: Fit and validate power-law rank models
+        run: python3 analyze_power_law_rank_audit.py
+
   core-validation:
     runs-on: ubuntu-latest
     timeout-minutes: 30
