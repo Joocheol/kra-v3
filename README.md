@@ -30,6 +30,16 @@
 
 ## 실질 분석 결과
 
+2022--2024년 상한 없는 1,543경주의 완전한 마권표를 순위곡선으로 바꾸어
+분산형·중간형·집중형 세 유형을 적합하고, 2025년을 시간외 검증했다. 실제 상한
+경주에서 상한 바로 아래의 점식별 셀을 추가로 가린 검증에서는 네 가상상한
+모두에서 순위분포 모형의 셀 MAE가 균등배분보다 낮았다. 반면 정상경주의
+7,000·9,000배 검증과 지급배당 선택표본 일부에서는 우위가 없었다. 실제 상한
+7,546경주 중 학습자료와 공통지지에 드는 경주는 4,398경주(58.3%)다. 따라서 이
+방법은 회계적 식별집합을 대체하지 않는 **조건부 모형복원**으로만 사용한다.
+점추정 무투표는 0개, 잔여총량과 세 유형을 움직인 모형범위는 0--3,924개지만,
+학습표본에 실제 0이 없으므로 구조적 0의 식별 결과가 아니다.
+
 2022--2024년으로 모형을 선택하고 2025년을 시간외 평가한 가상 상한 실험에서는
 3,000·5,000배의 일부 비균등 모형이 균등보다 나았지만 7,000배의 차이는 작고
 모형별 방향도 일치하지 않았다. 이 원표본은 실제 상한 대상보다 격자가 작고
@@ -141,6 +151,7 @@ dual-discounted Harville(`lambda2=0.800`, `lambda3=0.675`)을 2025년에
 - `findings/cross_market_input_validation.md`
 - `findings/outcome_evaluation.md`
 - `findings/outcome_robustness.md`
+- `findings/rank_profile_imputation.md`
 
 ## 재현
 
@@ -157,6 +168,7 @@ python3 validate_cross_market_inputs.py
 python3 diagnose_snapshot_mismatch.py
 python3 analyze_outcome_evaluation.py
 python3 analyze_outcome_robustness.py
+python3 analyze_rank_profile_imputation.py
 git diff --exit-code -- \
   findings \
   데이터/outcome_robustness.csv.gz \
@@ -167,8 +179,8 @@ expected="$(tr -d '[:space:]' < 데이터/outcome_evaluation.sha256)"
 test "$actual" = "$expected"
 ```
 
-CI에서는 단위·속성·종단간 테스트, 입력검증, 스냅샷 진단, 2025년 착순평가와
-검토 후 강건성 분석을 전수 실행한다. 착순평가 보고서와 강건성 보고서는
+CI에서는 단위·속성·종단간 테스트, 입력검증, 스냅샷 진단, 2025년 착순평가,
+검토 후 강건성 분석과 순위분포 복원을 전수 실행한다. 착순평가 보고서와 강건성 보고서는
 커밋본과 직접 비교하고, 두 압축 CSV도 압축을 푼 내용 단위로 대조한다.
 최초 경주별 착순평가 16,982행의 SHA-256은
 `0e31d3b138e3204cdd4dff876c4fcd0303ae5e7ec0ca0dbde8069b149202e3f6`로 고정한다.

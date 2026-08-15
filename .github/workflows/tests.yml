@@ -86,6 +86,36 @@ jobs:
       - name: Verify frozen masked report
         run: git diff --exit-code -- findings/masked_reconstruction.md
 
+  rank-profile-imputation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install analysis dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
+      - name: Preserve committed rank-profile artifacts
+        run: |
+          cp 데이터/rank_profile_validation.csv.gz /tmp/rank-validation-committed.csv.gz
+          cp 데이터/rank_profile_imputation_races.csv.gz /tmp/rank-races-committed.csv.gz
+          cp 데이터/rank_profile_imputed_cells.csv.gz /tmp/rank-cells-committed.csv.gz
+      - name: Test rank-profile helpers
+        run: python3 -m unittest discover -s tests -p 'test_rank_profile.py' -v
+      - name: Reproduce rank-profile imputation
+        run: python3 analyze_rank_profile_imputation.py
+      - name: Verify full rank-profile outputs
+        run: |
+          cmp /tmp/rank-validation-committed.csv.gz 데이터/rank_profile_validation.csv.gz
+          cmp /tmp/rank-races-committed.csv.gz 데이터/rank_profile_imputation_races.csv.gz
+          cmp /tmp/rank-cells-committed.csv.gz 데이터/rank_profile_imputed_cells.csv.gz
+      - name: Verify frozen rank-profile report and figures
+        run: >-
+          git diff --exit-code --
+          findings/rank_profile_imputation.md
+          findings/rank_profile_types.png
+          findings/rank_profile_validation.png
+
   core-validation:
     runs-on: ubuntu-latest
     timeout-minutes: 30

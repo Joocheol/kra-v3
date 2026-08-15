@@ -1,6 +1,6 @@
 # 분석 결과 안내
 
-현재 재현 파이프라인이 생성하고 동결하는 보고서는 다음 열 개다.
+현재 재현 파이프라인이 생성하고 동결하는 보고서는 다음 열한 개다.
 
 - `winning_capped_payouts.md`: 동결 상세 성적표와 격자 방향 감사
 - `trifecta_feasible_sets.md`: 삼쌍승 상한 셀의 회계적 부분식별
@@ -12,9 +12,10 @@
 - `cross_market_input_validation.md`: 교차시장 원시 격자의 전수 preflight
 - `outcome_evaluation.md`: 사전 고정한 2025년 실제 착순 평가
 - `outcome_robustness.md`: Claude 2차 검토 후 dual-discount 기준선·실제 쌍승 풀 비교·capped-mass 검정·부분식별 강건성
+- `rank_profile_imputation.md`: 상한 없는 경주의 순위분포 유형 적합·2025년 시간외 검증·실제 상한 셀 조건부 복원
 
 나머지 문서는 탐색 과정의 과거 메모다. `censored_grid.md`, `point_id_gap.md`,
 `tfoot_diagnosis.md`, `cells_committed.md`, `sales_verification.md`는 현재 파이프라인보다
-앞선 진단 기록이며 수치나 주장이 충돌하면 위 열 개 보고서, `RESEARCH_PROTOCOL.md`,
+앞선 진단 기록이며 수치나 주장이 충돌하면 위 열한 개 보고서, `RESEARCH_PROTOCOL.md`,
 `README.md`를 따른다. `gpt_test_response.md`는 분석 결과가 아니라 워크플로
 연결 시험 기록이다.
