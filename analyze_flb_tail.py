@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Date-clustered FLB diagnostic for the capped trifecta tail.
 
-The estimand is deliberately allocation-free.  For each race, Y is one when
+The estimand is deliberately allocation-free. For each race, Y is one when
 the realised trifecta lies in the displayed-9999.9 set and Q is the aggregate
 ticket mass assigned to that set by the frozen accounting feasible-set
-scenario.  FLB direction is Y < Q: the extreme-longshot set receives more
+scenario. FLB direction is Y < Q: the extreme-longshot set receives more
 betting mass than its realised frequency.
 """
 from __future__ import annotations
@@ -19,11 +19,6 @@ import numpy as np
 
 DATA = pathlib.Path("데이터")
 SCENARIOS = ("residual_min", "residual_mid", "residual_max")
-FEASIBLE_COLUMNS = {
-    "residual_min": "feasible_residual_min",
-    "residual_mid": None,
-    "residual_max": "feasible_residual_max",
-}
 BOOTSTRAP_DRAWS = 20000
 SEED = 20260816
 
@@ -68,7 +63,12 @@ def load_outcomes(path: pathlib.Path) -> list[dict[str, object]]:
     return rows
 
 
-def clustered_result(rows: list[dict[str, object]], feasible: dict[str, dict[str, float]], scenario: str, seed: int) -> dict[str, float | int]:
+def clustered_result(
+    rows: list[dict[str, object]],
+    feasible: dict[str, dict[str, float]],
+    scenario: str,
+    seed: int,
+) -> dict[str, float | int]:
     merged = []
     for row in rows:
         info = feasible.get(str(row["race_id"]))
@@ -87,33 +87,28 @@ def clustered_result(rows: list[dict[str, object]], feasible: dict[str, dict[str
     n = len(merged)
     mu = (O - E) / n
 
-    # Intercept-only date-cluster sandwich SE.  The cluster influence is
+    # Intercept-only date-cluster sandwich SE. The cluster influence is
     # S_g - mu*n_g, allowing race counts to differ by date.
-    influences = []
-    for date in dates:
-        vals = by_date[date]
-        s = sum(y - q for y, q in vals)
-        influences.append(s - mu * len(vals))
+    cluster_o = np.asarray([sum(y for y, _ in by_date[d]) for d in dates], dtype=float)
+    cluster_e = np.asarray([sum(q for _, q in by_date[d]) for d in dates], dtype=float)
+    cluster_n = np.asarray([len(by_date[d]) for d in dates], dtype=float)
+    influences = (cluster_o - cluster_e) - mu * cluster_n
     G = len(dates)
-    se = math.sqrt((G / (G - 1)) * sum(v * v for v in influences)) / n if G > 1 else math.nan
+    se = math.sqrt((G / (G - 1)) * float(np.dot(influences, influences))) / n if G > 1 else math.nan
     z = mu / se if se > 0 else math.nan
     # One-sided normal approximation for H1: Y-Q < 0.
     p_one = 0.5 * math.erfc(-z / math.sqrt(2)) if math.isfinite(z) else math.nan
 
+    # Resampling dates with replacement is equivalent to multinomial cluster
+    # multiplicities. Vectorising that equivalence keeps the estimand exactly
+    # the same while avoiding Python loops over every sampled date.
     rng = np.random.default_rng(seed)
-    ratios = np.empty(BOOTSTRAP_DRAWS, dtype=float)
-    mus = np.empty(BOOTSTRAP_DRAWS, dtype=float)
-    for b in range(BOOTSTRAP_DRAWS):
-        chosen = rng.choice(dates, size=G, replace=True)
-        ob = eb = 0.0
-        nb = 0
-        for date in chosen:
-            vals = by_date[str(date)]
-            ob += sum(y for y, _ in vals)
-            eb += sum(q for _, q in vals)
-            nb += len(vals)
-        ratios[b] = ob / eb
-        mus[b] = (ob - eb) / nb
+    weights = rng.multinomial(G, np.full(G, 1.0 / G), size=BOOTSTRAP_DRAWS)
+    obs_b = weights @ cluster_o
+    exp_b = weights @ cluster_e
+    n_b = weights @ cluster_n
+    ratios = obs_b / exp_b
+    mus = (obs_b - exp_b) / n_b
     ratio_lo, ratio_hi = np.quantile(ratios, [0.025, 0.975])
     mu_lo, mu_hi = np.quantile(mus, [0.025, 0.975])
     return {
