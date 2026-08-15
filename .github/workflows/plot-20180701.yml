@@ -1,0 +1,27 @@
+name: Plot 2018-07-01 rank profiles
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  plot-rank-profiles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install analysis dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
+      - name: Plot empirical rank profiles
+        run: python3 plot_20180701_empirical_rank_profiles.py
+      - name: Upload figures
+        uses: actions/upload-artifact@v4
+        with:
+          name: empirical-rank-profiles-2018-07-01
+          path: artifacts/20180701_rank_profiles/
+          if-no-files-found: error
+          retention-days: 7
