@@ -62,7 +62,7 @@ jobs:
           <(gzip -cd 데이터/outcome_robustness.csv.gz)
       - name: Verify frozen robustness report
         run: git diff --exit-code -- findings/outcome_robustness.md
-      - name: Show robustness report
+      - name: Show outcome report
         run: cat findings/outcome_robustness.md
 
   masked-reconstruction:
@@ -151,6 +151,18 @@ jobs:
         run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
       - name: Validate shifted-power plus empirical-tail hybrid
         run: python3 analyze_hybrid_tail_audit.py
+
+  conditional-tail-cv:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install analysis dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
+      - name: Select conditional correction pre-2025 and test on 2025
+        run: python3 analyze_conditional_tail_cv.py
 
   core-validation:
     runs-on: ubuntu-latest
