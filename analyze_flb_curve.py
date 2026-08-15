@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Allocation-free trifecta FLB curve over uncapped odds bands plus 9999.9.
+"""Allocation-free trifecta calibration/FLB curve over odds bands.
 
-For uncapped cells, accounting-consistent ticket counts are completed inside
-the displayed-odds rounding intervals. All 9999.9 cells in a race are kept as
-one aggregate terminal band; no within-cap allocation is made. The curve uses
-the accounting midpoint once; min/max robustness of the terminal capped band
-is handled separately by analyze_flb_tail.py.
+Uncapped cells are completed inside their exact one-decimal accounting
+intervals.  All displayed-9999.9 cells remain one aggregate terminal band, so
+no cross-pool or within-cap allocation can manufacture the tail result.
 """
 from __future__ import annotations
 
@@ -78,6 +76,66 @@ def race_band_mass(race: dict, market: dict, info: dict[str, int]) -> tuple[np.n
     return mass, winner_band
 
 
+def summarize(name: str, records: list[tuple[str, np.ndarray, int]], seed: int) -> None:
+    ranks = np.arange(len(LABELS), dtype=float)
+    by_date_o: dict[str, np.ndarray] = defaultdict(lambda: np.zeros(len(LABELS)))
+    by_date_e: dict[str, np.ndarray] = defaultdict(lambda: np.zeros(len(LABELS)))
+    by_date_disp: dict[str, float] = defaultdict(float)
+    by_date_n: dict[str, int] = defaultdict(int)
+    for date, mass, winner_band in records:
+        by_date_o[date][winner_band] += 1.0
+        by_date_e[date] += mass
+        by_date_disp[date] += float(winner_band - mass @ ranks)
+        by_date_n[date] += 1
+
+    dates = sorted(by_date_o)
+    cluster_o = np.vstack([by_date_o[d] for d in dates])
+    cluster_e = np.vstack([by_date_e[d] for d in dates])
+    cluster_disp = np.asarray([by_date_disp[d] for d in dates], dtype=float)
+    cluster_n = np.asarray([by_date_n[d] for d in dates], dtype=float)
+    O = cluster_o.sum(axis=0)
+    E = cluster_e.sum(axis=0)
+    ratio = O / E
+
+    rng = np.random.default_rng(seed)
+    g = len(dates)
+    weights = rng.multinomial(g, np.full(g, 1.0 / g), size=BOOTSTRAP_DRAWS)
+    ratio_b = (weights @ cluster_o) / (weights @ cluster_e)
+    ratio_lo = np.quantile(ratio_b, 0.025, axis=0)
+    ratio_hi = np.quantile(ratio_b, 0.975, axis=0)
+
+    # Nearby high-odds comparison: 3000--9999.8 vs terminal capped set.
+    near_o = cluster_o[:, 6:9].sum(axis=1)
+    near_e = cluster_e[:, 6:9].sum(axis=1)
+    near_ratio = near_o.sum() / near_e.sum()
+    cap_ratio = O[-1] / E[-1]
+    near_b = (weights @ near_o) / (weights @ near_e)
+    cap_b = (weights @ cluster_o[:, -1]) / (weights @ cluster_e[:, -1])
+    contrast = cap_ratio - near_ratio
+    contrast_b = cap_b - near_b
+    c_lo, c_hi = np.quantile(contrast_b, [0.025, 0.975])
+    p_cap_not_lower = (1.0 + float(np.sum(contrast_b >= 0.0))) / (BOOTSTRAP_DRAWS + 1.0)
+
+    disp_b = (weights @ cluster_disp) / (weights @ cluster_n)
+    disp = float(cluster_disp.sum() / cluster_n.sum())
+    d_lo, d_hi = np.quantile(disp_b, [0.025, 0.975])
+
+    for i, label in enumerate(LABELS):
+        print(
+            f"BAND,{name},{label},{int(O[i])},{E[i]:.6f},{ratio[i]:.6f},"
+            f"{ratio_lo[i]:.6f},{ratio_hi[i]:.6f}"
+        )
+    print(
+        f"CONTRAST,{name},3000--9999.8_vs_cap,near={near_ratio:.6f},cap={cap_ratio:.6f},"
+        f"cap_minus_near={contrast:.6f},CI=[{c_lo:.6f},{c_hi:.6f}],"
+        f"bootstrap_fraction_cap_not_lower={p_cap_not_lower:.6f}"
+    )
+    print(
+        f"ORDINAL,{name},races={int(cluster_n.sum())},dates={len(dates)},"
+        f"winner_minus_bet_rank={disp:.6f},CI=[{d_lo:.6f},{d_hi:.6f}]"
+    )
+
+
 def main() -> int:
     data = pathlib.Path("데이터")
     races = load_race_records(data / "races.jsonl.gz")
@@ -98,49 +156,10 @@ def main() -> int:
         if idx % 1000 == 0:
             print(f"# scanned {idx}/{len(feasible)}", flush=True)
 
-    ranks = np.arange(len(LABELS), dtype=float)
-    by_date_o: dict[str, np.ndarray] = defaultdict(lambda: np.zeros(len(LABELS)))
-    by_date_e: dict[str, np.ndarray] = defaultdict(lambda: np.zeros(len(LABELS)))
-    by_date_score: dict[str, float] = defaultdict(float)
-    by_date_n: dict[str, int] = defaultdict(int)
-    for date, mass, winner_band in records:
-        by_date_o[date][winner_band] += 1.0
-        by_date_e[date] += mass
-        by_date_score[date] += float(winner_band - mass @ ranks)
-        by_date_n[date] += 1
-
-    dates = sorted(by_date_o)
-    cluster_o = np.vstack([by_date_o[d] for d in dates])
-    cluster_e = np.vstack([by_date_e[d] for d in dates])
-    cluster_score = np.asarray([by_date_score[d] for d in dates], dtype=float)
-    cluster_n = np.asarray([by_date_n[d] for d in dates], dtype=float)
-    O = cluster_o.sum(axis=0)
-    E = cluster_e.sum(axis=0)
-    ratio = O / E
-
-    rng = np.random.default_rng(SEED)
-    g = len(dates)
-    weights = rng.multinomial(g, np.full(g, 1.0 / g), size=BOOTSTRAP_DRAWS)
-    ratio_b = (weights @ cluster_o) / (weights @ cluster_e)
-    ratio_lo = np.quantile(ratio_b, 0.025, axis=0)
-    ratio_hi = np.quantile(ratio_b, 0.975, axis=0)
-    score_b = (weights @ cluster_score) / (weights @ cluster_n)
-    score = float(cluster_score.sum() / cluster_n.sum())
-    score_lo, score_hi = np.quantile(score_b, [0.025, 0.975])
-    p_direction_failure = (1.0 + float(np.sum(score_b >= 0.0))) / (BOOTSTRAP_DRAWS + 1.0)
-
-    print("scenario,band,observed,expected,O_over_E,ratio_ci_low,ratio_ci_high,take_adjusted_return")
-    for i, label in enumerate(LABELS):
-        print(
-            f"{SCENARIO},{label},{int(O[i])},{E[i]:.6f},{ratio[i]:.6f},"
-            f"{ratio_lo[i]:.6f},{ratio_hi[i]:.6f},{TAKE*ratio[i]:.6f}"
-        )
-    print(
-        f"GLOBAL {SCENARIO} races={int(cluster_n.sum())} dates={len(dates)} "
-        f"ordinal_FLB_score={score:.6f} CI=[{score_lo:.6f},{score_hi:.6f}] "
-        f"bootstrap_fraction_nonnegative={p_direction_failure:.6f}",
-        flush=True,
-    )
+    print("# O/E < 1 means the odds band receives more ticket mass than its realised winner frequency.")
+    summarize("2022--2025", records, SEED)
+    for offset, year in enumerate(("2022", "2023", "2024", "2025"), 1):
+        summarize(year, [r for r in records if r[0][:4] == year], SEED + offset)
     return 0
 
 
