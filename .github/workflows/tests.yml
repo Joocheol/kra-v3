@@ -116,6 +116,18 @@ jobs:
           findings/rank_profile_types.png
           findings/rank_profile_validation.png
 
+  rank-profile-correction-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install analysis dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
+      - name: Recompute validation with symmetric hidden bounds
+        run: python3 analyze_rank_profile_correction.py
+
   core-validation:
     runs-on: ubuntu-latest
     timeout-minutes: 30
