@@ -19,6 +19,11 @@ import numpy as np
 
 DATA = pathlib.Path("데이터")
 SCENARIOS = ("residual_min", "residual_mid", "residual_max")
+FEASIBLE_COLUMNS = {
+    "residual_min": "feasible_residual_min",
+    "residual_mid": None,
+    "residual_max": "feasible_residual_max",
+}
 BOOTSTRAP_DRAWS = 20000
 SEED = 20260816
 
@@ -30,8 +35,15 @@ def load_feasible(path: pathlib.Path) -> dict[str, dict[str, float]]:
             if not ("2022" <= row["year"] <= "2025" and row["strict_feasible"] == "1"):
                 continue
             total = int(row["total_tickets"])
+            lo = int(row["feasible_residual_min"])
+            hi = int(row["feasible_residual_max"])
+            counts = {
+                "residual_min": lo,
+                "residual_mid": (lo + hi) // 2,
+                "residual_max": hi,
+            }
             out[row["race_id"]] = {
-                scenario: int(row[scenario]) / total for scenario in SCENARIOS
+                scenario: counts[scenario] / total for scenario in SCENARIOS
             }
     return out
 
