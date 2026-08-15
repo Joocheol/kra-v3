@@ -87,8 +87,6 @@ def clustered_result(
     n = len(merged)
     mu = (O - E) / n
 
-    # Intercept-only date-cluster sandwich SE. The cluster influence is
-    # S_g - mu*n_g, allowing race counts to differ by date.
     cluster_o = np.asarray([sum(y for y, _ in by_date[d]) for d in dates], dtype=float)
     cluster_e = np.asarray([sum(q for _, q in by_date[d]) for d in dates], dtype=float)
     cluster_n = np.asarray([len(by_date[d]) for d in dates], dtype=float)
@@ -96,12 +94,8 @@ def clustered_result(
     G = len(dates)
     se = math.sqrt((G / (G - 1)) * float(np.dot(influences, influences))) / n if G > 1 else math.nan
     z = mu / se if se > 0 else math.nan
-    # One-sided normal approximation for H1: Y-Q < 0.
     p_one = 0.5 * math.erfc(-z / math.sqrt(2)) if math.isfinite(z) else math.nan
 
-    # Resampling dates with replacement is equivalent to multinomial cluster
-    # multiplicities. Vectorising that equivalence keeps the estimand exactly
-    # the same while avoiding Python loops over every sampled date.
     rng = np.random.default_rng(seed)
     weights = rng.multinomial(G, np.full(G, 1.0 / G), size=BOOTSTRAP_DRAWS)
     obs_b = weights @ cluster_o
@@ -110,7 +104,9 @@ def clustered_result(
     ratios = obs_b / exp_b
     mus = (obs_b - exp_b) / n_b
     ratio_lo, ratio_hi = np.quantile(ratios, [0.025, 0.975])
+    ratio_u95 = np.quantile(ratios, 0.95)
     mu_lo, mu_hi = np.quantile(mus, [0.025, 0.975])
+    mu_u95 = np.quantile(mus, 0.95)
     return {
         "races": n,
         "dates": G,
@@ -119,9 +115,11 @@ def clustered_result(
         "ratio": O / E,
         "ratio_lo": float(ratio_lo),
         "ratio_hi": float(ratio_hi),
+        "ratio_u95": float(ratio_u95),
         "mean_diff": mu,
         "mean_diff_lo": float(mu_lo),
         "mean_diff_hi": float(mu_hi),
+        "mean_diff_u95": float(mu_u95),
         "z": z,
         "p_one": p_one,
     }
@@ -135,7 +133,7 @@ def main() -> int:
         ("2022--2024", lambda y: "2022" <= y <= "2024"),
         ("2022--2025", lambda y: "2022" <= y <= "2025"),
     )
-    print("sample,scenario,races,dates,observed,expected,O_over_E,ratio_ci_low,ratio_ci_high,mean_Y_minus_Q,mean_ci_low,mean_ci_high,cluster_z,p_one_sided")
+    print("sample,scenario,races,dates,observed,expected,O_over_E,ratio_ci_low,ratio_ci_high,ratio_one_sided_95_upper,mean_Y_minus_Q,mean_ci_low,mean_ci_high,mean_one_sided_95_upper,cluster_z,p_one_sided")
     k = 0
     for sample, keep in samples:
         subset = [row for row in outcomes if keep(str(row["year"]))]
@@ -145,9 +143,9 @@ def main() -> int:
             print(
                 f"{sample},{scenario},{result['races']},{result['dates']},"
                 f"{int(result['observed'])},{result['expected']:.6f},{result['ratio']:.6f},"
-                f"{result['ratio_lo']:.6f},{result['ratio_hi']:.6f},"
+                f"{result['ratio_lo']:.6f},{result['ratio_hi']:.6f},{result['ratio_u95']:.6f},"
                 f"{result['mean_diff']:.8f},{result['mean_diff_lo']:.8f},{result['mean_diff_hi']:.8f},"
-                f"{result['z']:.4f},{result['p_one']:.6f}"
+                f"{result['mean_diff_u95']:.8f},{result['z']:.4f},{result['p_one']:.6f}"
             )
     return 0
 
