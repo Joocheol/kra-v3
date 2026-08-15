@@ -64,6 +64,8 @@ jobs:
         run: git diff --exit-code -- findings/outcome_robustness.md
       - name: Show robustness report
         run: cat findings/outcome_robustness.md
+      - name: Run date-clustered capped-tail FLB diagnostic
+        run: python3 analyze_flb_tail.py
 
   masked-reconstruction:
     runs-on: ubuntu-latest
