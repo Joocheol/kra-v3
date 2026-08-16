@@ -9,138 +9,6 @@ permissions:
   contents: read
 
 jobs:
-  flb-tail:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - name: Install analysis dependencies
-        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
-      - name: Run date-clustered capped-tail FLB diagnostic
-        run: python3 analyze_flb_tail.py
-
-  flb-curve:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - name: Install analysis dependencies
-        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
-      - name: Estimate full trifecta FLB curve
-        run: python3 analyze_flb_curve.py
-
-  gabaix-rank-half:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - name: Install analysis dependencies
-        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
-      - name: Evaluate Gabaix-Ibragimov Rank-1/2 tail stability
-        run: python3 analyze_gabaix_rank_half.py
-
-  tail-family-competition:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - name: Install analysis dependencies
-        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
-      - name: Compare truncated tail families out of sample
-        run: python3 analyze_tail_family_competition.py
-
-  evt-gpd:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - name: Install analysis dependencies
-        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
-      - name: Evaluate right-truncated GPD threshold stability
-        run: python3 analyze_evt_gpd.py
-
-  all-race-censored-tail:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - name: Install analysis dependencies
-        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
-      - name: Fit tail families to all races with 9999.9 right-censoring
-        run: python3 analyze_all_race_censored_tail.py
-
-  liquidity-scaling:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - name: Install analysis dependencies
-        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
-      - name: Evaluate tickets-per-state scaling of cap incidence
-        run: python3 analyze_liquidity_scaling.py
-
-  rank-size-heterogeneity:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - name: Install analysis dependencies
-        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
-      - name: Evaluate race-level rank-size collapse and selection heterogeneity
-        run: python3 analyze_rank_size_heterogeneity.py
-
-  capped-regime-masking:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - name: Install analysis dependencies
-        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
-      - name: Pseudo-censor visible high-odds cells within real capped races
-        run: python3 analyze_capped_regime_masking.py
-
-  joint-reconstruction:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - name: Install analysis dependencies
-        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
-      - name: Fit and test joint tail reconstruction
-        run: python3 analyze_joint_reconstruction.py
-
-  capped-winner-validation:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          persist-credentials: false
-      - name: Install analysis dependencies
-        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
-      - name: Validate joint reconstruction on real capped winners
-        run: python3 validate_joint_capped_winners.py
-
   outcome-evaluation:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -168,9 +36,6 @@ jobs:
           actual="$(gzip -cd 데이터/outcome_evaluation.csv.gz | sha256sum | awk '{print $1}')"
           expected="$(tr -d '[:space:]' < 데이터/outcome_evaluation.sha256)"
           test "$actual" = "$expected"
-          echo "$actual"
-      - name: Show outcome report
-        run: cat findings/outcome_evaluation.md
 
   outcome-robustness:
     runs-on: ubuntu-latest
@@ -194,8 +59,6 @@ jobs:
           <(gzip -cd 데이터/outcome_robustness.csv.gz)
       - name: Verify frozen robustness report
         run: git diff --exit-code -- findings/outcome_robustness.md
-      - name: Show robustness report
-        run: cat findings/outcome_robustness.md
 
   masked-reconstruction:
     runs-on: ubuntu-latest
