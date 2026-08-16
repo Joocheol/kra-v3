@@ -14,7 +14,7 @@ LIMIT = 1000
 def count_exact(total: int, k: int, u: int, limit: int) -> int:
     """Count sorted integer vectors u>=x1>=...>=xk>=0 summing to total.
 
-    Return at most limit+1.  By Ferrers-diagram complementation the coefficient
+    Return at most limit+1. By Ferrers-diagram complementation the coefficient
     is symmetric around k*u/2, which substantially reduces the search target.
     """
     if total < 0 or total > k * u:
@@ -36,7 +36,6 @@ def count_exact(total: int, k: int, u: int, limit: int) -> int:
             return
         if slots <= 0 or max_part <= 0 or rem > slots * max_part:
             return
-
         hi = min(max_part, rem)
         lo = max(1, (rem + slots - 1) // slots)
         for x in range(hi, lo - 1, -1):
@@ -57,9 +56,6 @@ def count_interval(lo: int, hi: int, k: int, u: int, limit: int = LIMIT) -> int:
     hi = min(k * u, hi)
     if lo > hi:
         return 0
-
-    # Coefficients of the Gaussian binomial are largest near k*u/2.
-    # Start there so clearly non-identified races terminate almost immediately.
     peak = k * u // 2
     center = min(max(peak, lo), hi)
     total_count = 0
@@ -73,7 +69,6 @@ def count_interval(lo: int, hi: int, k: int, u: int, limit: int = LIMIT) -> int:
 
     if add(center):
         return limit + 1
-
     d = 1
     while center - d >= lo or center + d <= hi:
         if center - d >= lo and add(center - d):
@@ -118,9 +113,6 @@ class SortedPartition2017(unittest.TestCase):
             if n <= LIMIT:
                 strict_detail.append((n, r["race_id"], int(r["sales_won"]), k, u, lo, hi))
 
-        # For the 744 races that fail the strict rounding/accounting convention,
-        # use the already-computed falsification-robust relaxed residual interval.
-        # Report separately because this is deliberately much less informative.
         combined_counts = Counter()
         nonstrict_relaxed_detail = []
         for r in rows:
@@ -153,6 +145,7 @@ class SortedPartition2017(unittest.TestCase):
 
         self.assertEqual(sum(strict_counts.values()), 1660)
         self.assertEqual(sum(combined_counts.values()), 2404)
+        self.fail("intentional temporary diagnostic stop after result output")
 
 
 if __name__ == "__main__":
