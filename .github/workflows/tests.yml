@@ -69,6 +69,18 @@ jobs:
       - name: Evaluate right-truncated GPD threshold stability
         run: python3 analyze_evt_gpd.py
 
+  rank-size-heterogeneity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install analysis dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
+      - name: Evaluate race-level rank-size collapse and selection heterogeneity
+        run: python3 analyze_rank_size_heterogeneity.py
+
   joint-reconstruction:
     runs-on: ubuntu-latest
     timeout-minutes: 15
