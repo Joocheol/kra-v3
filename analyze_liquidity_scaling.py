@@ -2,7 +2,7 @@
 """Stage-5 liquidity/state-space scaling diagnostic.
 
 Motivated only at a high level by Gabaix et al. (2003): ask whether the scale
-of trading activity helps explain extreme-price incidence.  We do NOT import
+of trading activity helps explain extreme-price incidence. We do NOT import
 their financial-market mechanism into horse racing.
 
 For every strict-feasible 2022--2025 trifecta race:
@@ -12,13 +12,10 @@ For every strict-feasible 2022--2025 trifecta race:
   C/K = fraction of displayed 9999.9 states
 
 Binomial logit models for C out of K are fitted on 2022--2024 and evaluated on
-2025.  The main question is whether current-race liquidity/state-space features
-explain the temporal drop in cap incidence that defeated unconditional tail
-models.
+2025. The objective is scaled by total states for numerical stability.
 """
 from __future__ import annotations
 
-import math
 import pathlib
 
 import numpy as np
@@ -64,16 +61,21 @@ def fit_logit(data:list[dict],spec:str)->np.ndarray:
     X=design(data,spec)
     C=np.asarray([r["C"] for r in data],dtype=float)
     K=np.asarray([r["K"] for r in data],dtype=float)
+    scale=float(K.sum())
     def fg(beta):
         eta=X@beta
-        # stable binomial negative log likelihood, constants omitted
-        loss=float(np.sum(K*np.logaddexp(0,eta)-C*eta))
+        # Divide by total states so objective and gradient stay O(1), avoiding
+        # BFGS precision-loss warnings from multi-million-cell likelihoods.
+        loss=float(np.sum(K*np.logaddexp(0,eta)-C*eta)/scale)
         p=expit(eta)
-        grad=X.T@(K*p-C)
+        grad=(X.T@(K*p-C))/scale
         return loss,grad
-    res=minimize(lambda b:fg(b)[0],np.zeros(X.shape[1]),jac=lambda b:fg(b)[1],method="BFGS",options={"gtol":1e-8,"maxiter":500})
-    if not res.success and np.linalg.norm(res.jac)>1e-4:
-        raise RuntimeError(res.message)
+    res=minimize(
+        lambda b:fg(b)[0],np.zeros(X.shape[1]),jac=lambda b:fg(b)[1],
+        method="BFGS",options={"gtol":1e-9,"maxiter":1000},
+    )
+    if not res.success and np.linalg.norm(res.jac)>1e-6:
+        raise RuntimeError(f"{spec}: {res.message}; |grad|={np.linalg.norm(res.jac):.3g}")
     return np.asarray(res.x)
 
 
@@ -86,7 +88,6 @@ def evaluate(data:list[dict],spec:str,beta:np.ndarray)->dict[str,float]:
     agg_actual=float(C.sum()/K.sum())
     agg_pred=float((K*p).sum()/K.sum())
     race_mae=float(np.mean(np.abs(y-p)))
-    # cell-weighted Bernoulli log score using observed race fractions
     ll=float(np.sum(C*np.log(np.maximum(p,1e-300))+(K-C)*np.log(np.maximum(1-p,1e-300)))/K.sum())
     return {"actual":agg_actual,"pred":agg_pred,"abs":abs(agg_pred-agg_actual),"mae":race_mae,"ll":ll}
 
@@ -121,7 +122,6 @@ def main()->int:
         coefs=";".join(f"{n}={v:.6f}" for n,v in zip(coef_names(spec),beta))
         print(f"{spec},{coefs},{ev['actual']:.8f},{ev['pred']:.8f},{ev['abs']:.8f},{ev['mae']:.8f},{ev['ll']:.9f}")
 
-    # Descriptive bins based on training liquidity quantiles, applied unchanged to 2025.
     qs=np.quantile([r["L"] for r in train],[0.2,0.4,0.6,0.8])
     def binid(x): return int(np.searchsorted(qs,x,side="right"))+1
     print("\n# liquidity bins defined from 2022-2024 T/K quintiles")
@@ -130,7 +130,10 @@ def main()->int:
         for b in range(1,6):
             sub=[r for r in g if binid(r["L"])==b]
             states=sum(r["K"] for r in sub); caps=sum(r["C"] for r in sub)
-            print(f"{label},{b},{len(sub)},{np.median([r['L'] for r in sub]):.6f},{caps/states:.8f}")
+            if not sub or states==0:
+                print(f"{label},{b},0,nan,nan")
+            else:
+                print(f"{label},{b},{len(sub)},{np.median([r['L'] for r in sub]):.6f},{caps/states:.8f}")
 
     best=min(specs,key=lambda s:results[s]["abs"])
     print(f"\nVERDICT best_2025_aggregate={best} abs_error={results[best]['abs']:.8f}")
