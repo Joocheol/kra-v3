@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """Stage-4 Gabaix/Zipf diagnostic: race-level rank-size heterogeneity.
 
-This evaluates the user's original idea at the race level rather than pooling
-all odds cells. Two complementary questions are asked:
-
-1. On entirely uncapped races, do normalized rank-size/quantile curves collapse
-   to a stable common template that predicts held-out 2025 tail quantiles?
-2. Using threshold exceedance counts that are exactly observable even for
-   capped races (a 9999.9 cell is certainly above 3000/5000/7000), do capped
-   and uncapped races already have different pre-cap local tail slopes?
-
-Only the trifecta (3Both) grids are loaded; no lower-order pool is needed.
+Two questions are separated carefully:
+1. On entirely uncapped races, do normalized rank-size curves form a stable
+   template that predicts held-out 2025 tail quantiles?
+2. Are capped and uncapped races transferable?  We report both (a) threshold
+   slopes including capped cells, which exactly diagnose whole-race selection,
+   and (b) slopes computed after *removing every 9999.9 cell*, which test
+   whether the still-visible 3000--7000 tail already differs below the cap.
 """
 from __future__ import annotations
 
@@ -27,6 +24,7 @@ DATA = pathlib.Path("데이터")
 THRESHOLDS = (3000.0, 5000.0, 7000.0)
 ANCHORS = (0.50, 0.90)
 TARGET_Q = (0.95, 0.975, 0.99)
+CAP_DISPLAY = 9999.9
 
 
 def local_slope(n_lo: int, n_hi: int, lo: float, hi: float) -> float | None:
@@ -51,6 +49,14 @@ def describe(values: list[float]) -> str:
     return f"n={len(a)};median={med:.6f};q25={q25:.6f};q75={q75:.6f}"
 
 
+def slope_triplet(odds: np.ndarray) -> tuple[float | None, float | None, float | None]:
+    counts = {u: int(np.sum(odds >= u)) for u in THRESHOLDS}
+    z35 = local_slope(counts[3000.0], counts[5000.0], 3000.0, 5000.0)
+    z57 = local_slope(counts[5000.0], counts[7000.0], 5000.0, 7000.0)
+    curvature = None if z35 is None or z57 is None else z57 - z35
+    return z35, z57, curvature
+
+
 def main() -> int:
     races = load_races(DATA / "races.jsonl.gz")
     feasible = load_feasible(DATA / "trifecta_feasible_sets.csv.gz")
@@ -60,10 +66,9 @@ def main() -> int:
     for idx, race_id in enumerate(sorted(feasible), 1):
         race = races[race_id]
         odds = np.asarray([float(value) for _, value in grids[race_id]], dtype=float)
-        K = len(odds)
-        counts = {u: int(np.sum(odds >= u)) for u in THRESHOLDS}
-        z35 = local_slope(counts[3000.0], counts[5000.0], 3000.0, 5000.0)
-        z57 = local_slope(counts[5000.0], counts[7000.0], 5000.0, 7000.0)
+        visible = odds[odds != CAP_DISPLAY]
+        z35, z57, curvature = slope_triplet(odds)
+        vz35, vz57, vcurvature = slope_triplet(visible)
         capped_cells = int(feasible[race_id]["capped_cells"])
         field = len(set(race["horses"]) - set(race.get("scratched") or []))
         turnover = _won(race["sales"]["삼쌍승식"])
@@ -80,13 +85,16 @@ def main() -> int:
             "year": int(race["date"][:4]),
             "capped": capped_cells > 0,
             "capped_cells": capped_cells,
-            "K": K,
+            "K": len(odds),
             "field": field,
             "field_band": field_band(field),
             "turnover": turnover,
             "z35": z35,
             "z57": z57,
-            "curvature": None if z35 is None or z57 is None else z57 - z35,
+            "curvature": curvature,
+            "visible_z35": vz35,
+            "visible_z57": vz57,
+            "visible_curvature": vcurvature,
             "q50": quant[0.50],
             "q90": quant[0.90],
             **{f"nq{q}": normq[q] for q in TARGET_Q},
@@ -95,7 +103,7 @@ def main() -> int:
         if idx % 1000 == 0:
             print(f"# summarized {idx}/{len(feasible)}", flush=True)
 
-    # Part A: common normalized template learned only on uncapped races.
+    # Part A: normalized template among entirely uncapped races.
     train = [r for r in rows if not r["capped"] and r["year"] <= 2024]
     test = [r for r in rows if not r["capped"] and r["year"] == 2025]
     template = {
@@ -129,17 +137,29 @@ def main() -> int:
         q25, med, q75 = np.quantile(vals, [0.25, 0.5, 0.75])
         print(f"{q:.3f},{len(vals)},{q25:.6f},{med:.6f},{q75:.6f},{q75-q25:.6f}")
 
-    # Part B: local threshold slopes identifiable in both capped and uncapped races.
-    print("\n# local threshold slopes by capped status")
+    # Part B1: exact whole-tail selection diagnostic including capped cells.
+    print("\n# local threshold slopes including capped cells")
     print("group,races,z35,z57,curvature")
     for capped in (False, True):
         group = [r for r in rows if r["capped"] == capped]
         name = "capped" if capped else "uncapped"
-        z35 = [float(r["z35"]) for r in group if r["z35"] is not None]
-        z57 = [float(r["z57"]) for r in group if r["z57"] is not None]
+        z35s = [float(r["z35"]) for r in group if r["z35"] is not None]
+        z57s = [float(r["z57"]) for r in group if r["z57"] is not None]
         curv = [float(r["curvature"]) for r in group if r["curvature"] is not None]
-        print(f"{name},{len(group)},{describe(z35)},{describe(z57)},{describe(curv)}")
+        print(f"{name},{len(group)},{describe(z35s)},{describe(z57s)},{describe(curv)}")
 
+    # Part B2: stronger non-tautological diagnostic using only visible <cap cells.
+    print("\n# visible-only local threshold slopes after removing every 9999.9 cell")
+    print("group,races,z35,z57,curvature")
+    for capped in (False, True):
+        group = [r for r in rows if r["capped"] == capped]
+        name = "capped" if capped else "uncapped"
+        z35s = [float(r["visible_z35"]) for r in group if r["visible_z35"] is not None]
+        z57s = [float(r["visible_z57"]) for r in group if r["visible_z57"] is not None]
+        curv = [float(r["visible_curvature"]) for r in group if r["visible_curvature"] is not None]
+        print(f"{name},{len(group)},{describe(z35s)},{describe(z57s)},{describe(curv)}")
+
+    # Within-uncapped heterogeneity by field size and turnover.
     uncapped = [r for r in rows if not r["capped"]]
     turnovers = np.asarray([float(r["turnover"]) for r in uncapped])
     t1, t2 = np.quantile(turnovers, [1/3, 2/3])
@@ -147,28 +167,31 @@ def main() -> int:
         t = float(r["turnover"])
         r["turnover_band"] = "low" if t <= t1 else ("mid" if t <= t2 else "high")
 
-    print("\n# uncapped local curvature by field-size and turnover strata")
+    print("\n# uncapped visible local curvature by field-size and turnover strata")
     print("dimension,group,races,curvature")
     for dim in ("field_band", "turnover_band"):
         groups = sorted({str(r[dim]) for r in uncapped})
         for g in groups:
             sub = [r for r in uncapped if r[dim] == g]
-            curv = [float(r["curvature"]) for r in sub if r["curvature"] is not None]
+            curv = [float(r["visible_curvature"]) for r in sub if r["visible_curvature"] is not None]
             print(f"{dim},{g},{len(sub)},{describe(curv)}")
 
     q99_med, q99_p90 = template_errors[0.99]
     template_ok = q99_med <= 0.15 and q99_p90 <= 0.35
-    unc_curv = [float(r["curvature"]) for r in rows if not r["capped"] and r["curvature"] is not None]
-    cap_curv = [float(r["curvature"]) for r in rows if r["capped"] and r["curvature"] is not None]
-    curv_gap = abs(statistics.median(cap_curv) - statistics.median(unc_curv))
-    transfer_ok = curv_gap <= 0.5
+    unc_all = [float(r["curvature"]) for r in rows if not r["capped"] and r["curvature"] is not None]
+    cap_all = [float(r["curvature"]) for r in rows if r["capped"] and r["curvature"] is not None]
+    inclusive_gap = abs(statistics.median(cap_all) - statistics.median(unc_all))
+    unc_vis = [float(r["visible_curvature"]) for r in rows if not r["capped"] and r["visible_curvature"] is not None]
+    cap_vis = [float(r["visible_curvature"]) for r in rows if r["capped"] and r["visible_curvature"] is not None]
+    visible_gap = abs(statistics.median(cap_vis) - statistics.median(unc_vis))
+    transfer_ok = visible_gap <= 0.5
     print(
         "\nSUMMARY "
         f"q99_median_relative_error={q99_med:.6f} q99_p90_relative_error={q99_p90:.6f} "
-        f"capped_uncapped_median_curvature_gap={curv_gap:.6f}"
+        f"inclusive_curvature_gap={inclusive_gap:.6f} visible_only_curvature_gap={visible_gap:.6f}"
     )
     print("WITHIN_UNCAPPED_TEMPLATE", "CANDIDATE" if template_ok else "REJECT")
-    print("UNCAPPED_TO_CAPPED_TRANSFER", "NOT_REJECTED" if transfer_ok else "REJECT")
+    print("UNCAPPED_TO_CAPPED_VISIBLE_TRANSFER", "NOT_REJECTED" if transfer_ok else "REJECT")
     return 0
 
 
