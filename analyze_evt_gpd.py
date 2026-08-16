@@ -2,19 +2,23 @@
 """Stage-3 EVT diagnostic: right-truncated generalized Pareto tails.
 
 The sample is the same entirely-uncapped 2022--2025 trifecta-race sample used
-by the Rank-1/2 and tail-family diagnostics.  We fit a GPD to excesses above u
-while explicitly conditioning on observation below the display cap.  This
+by the Rank-1/2 and tail-family diagnostics. We fit a GPD to excesses above u
+while explicitly conditioning on observation below the display cap. This
 corrects cell-level right truncation in the likelihood, but it does not undo
-selection on the *whole race* having no capped cell; therefore passing remains
-a necessary pre-cap diagnostic, not sufficient evidence for above-cap truth.
+selection on the *whole race* having no capped cell.
 
-We test three things:
-  1. GPD shape xi stability as u rises;
-  2. theoretical scale shift sigma_v = sigma_u + xi*(v-u);
-  3. 2022--2024 fit -> 2025 OOS likelihood and higher-threshold counts.
+We therefore separate two questions:
+  1. Does GPD behave coherently *inside the selected uncapped-race sample*?
+  2. Is the implied tail support compatible with frozen official KRA payouts
+     from actual capped winners?
+
+Passing (1) is only a diagnostic. If known official payouts violate the finite
+endpoint implied by xi<0, the GPD is rejected as a global reconstruction prior.
 """
 from __future__ import annotations
 
+import csv
+import gzip
 import math
 import pathlib
 from dataclasses import dataclass
@@ -127,13 +131,39 @@ def conditional_survival(fit: GPDFit, v: float) -> float:
     return max(0.0, (St - SL) / (1.0 - SL))
 
 
+def implied_endpoint(fit: GPDFit) -> float:
+    """Finite D endpoint when xi<0; infinity otherwise."""
+    if fit.xi >= 0:
+        return math.inf
+    return fit.u - fit.sigma / fit.xi
+
+
+def load_official_capped_trifecta(path: pathlib.Path) -> list[tuple[str, float]]:
+    out: list[tuple[str, float]] = []
+    with gzip.open(path, "rt", encoding="utf-8", newline="") as fh:
+        for row in csv.DictReader(fh):
+            if row.get("pool") != "trifecta":
+                continue
+            date = row.get("race_date", "")
+            if not ("2022" <= date[:4] <= "2025"):
+                continue
+            raw = row.get("actual_odds", "")
+            if not raw:
+                continue
+            out.append((row["race_id"], float(raw)))
+    if not out:
+        raise ValueError("no frozen 2022--2025 official capped trifecta payouts")
+    return out
+
+
 def main() -> int:
-    rows = load_uncapped_odds(pathlib.Path("데이터"))
+    data = pathlib.Path("데이터")
+    rows = load_uncapped_odds(data)
     train_all = np.asarray([d for year, d in rows if year <= 2024], dtype=float)
     test_all = np.asarray([d for year, d in rows if year == 2025], dtype=float)
 
     print("# Right-truncated GPD threshold-stability diagnostic")
-    print("threshold,train_n,test_n,sigma,xi,train_mean_ll,test_mean_ll,stretched_test_mean_ll,gpd_minus_stretched")
+    print("threshold,train_n,test_n,sigma,xi,endpoint,train_mean_ll,test_mean_ll,stretched_test_mean_ll,gpd_minus_stretched")
     fits: dict[float, GPDFit] = {}
     key_count_errors = []
     key_ll_diffs = []
@@ -148,8 +178,10 @@ def main() -> int:
         stretched_ll = float(family_logpdf(stretched, test).mean())
         if u in KEY_THRESHOLDS:
             key_ll_diffs.append(test_ll - stretched_ll)
+        endpoint = implied_endpoint(fit)
+        endpoint_text = "inf" if math.isinf(endpoint) else f"{endpoint:.3f}"
         print(
-            f"{u:.0f},{len(train)},{len(test)},{fit.sigma:.6f},{fit.xi:.8f},"
+            f"{u:.0f},{len(train)},{len(test)},{fit.sigma:.6f},{fit.xi:.8f},{endpoint_text},"
             f"{fit.train_ll/len(train):.9f},{test_ll:.9f},{stretched_ll:.9f},{test_ll-stretched_ll:.9f}"
         )
 
@@ -176,6 +208,23 @@ def main() -> int:
             ratio = actual / pred if pred > 0 else math.inf
             print(f"{u:.0f},{v:.0f},{n_u},{actual},{pred:.3f},{rel:.6f},{ratio:.6f}")
 
+    official = load_official_capped_trifecta(data / "winning_capped_payouts.csv.gz")
+    official_max = max(value for _, value in official)
+    print("\n# External endpoint falsification using frozen official capped winners")
+    print(f"official_n={len(official)} official_max={official_max:.1f}")
+    print("fit_u,xi,implied_endpoint,official_above_endpoint,largest_official")
+    external_falsified = False
+    for u in KEY_THRESHOLDS:
+        fit = fits[u]
+        endpoint = implied_endpoint(fit)
+        above = 0 if math.isinf(endpoint) else sum(value > endpoint for _, value in official)
+        external_falsified = external_falsified or above > 0
+        endpoint_text = "inf" if math.isinf(endpoint) else f"{endpoint:.3f}"
+        print(f"{u:.0f},{fit.xi:.8f},{endpoint_text},{above},{official_max:.1f}")
+    if external_falsified:
+        examples = sorted(official, key=lambda item: item[1], reverse=True)[:5]
+        print("external_examples=" + " | ".join(f"{rid}:{value:.1f}" for rid, value in examples))
+
     xis = np.asarray([fits[u].xi for u in STABILITY_THRESHOLDS])
     xi_span = float(xis.max() - xis.min())
     mean_scale_error = float(np.mean(scale_errors))
@@ -184,19 +233,18 @@ def main() -> int:
     max_count_error = float(np.max(key_count_errors))
     mean_ll_diff = float(np.mean(key_ll_diffs))
 
-    # Conservative pre-specified screen.  Near xi=0, relative variation is not
-    # meaningful, so use absolute xi span.  Passing does not authorize actual
-    # above-cap reconstruction; it only makes GPD worth carrying forward.
     pass_stability = xi_span <= 0.15 and mean_scale_error <= 0.25
     pass_prediction = mean_count_error <= 0.25
-    verdict = "GPD_CANDIDATE" if pass_stability and pass_prediction else "REJECT_GLOBAL_GPD"
+    within = "GPD_CANDIDATE_WITHIN_UNCAPPED_SAMPLE" if pass_stability and pass_prediction else "REJECT_GPD_WITHIN_UNCAPPED_SAMPLE"
+    global_verdict = "REJECT_GLOBAL_GPD_PRIOR" if external_falsified else "GLOBAL_GPD_NOT_EXTERNALLY_FALSIFIED"
     print(
         "\nSUMMARY "
         f"xi_span={xi_span:.6f} mean_scale_error={mean_scale_error:.6f} "
         f"max_scale_error={max_scale_error:.6f} mean_count_error={mean_count_error:.6f} "
         f"max_count_error={max_count_error:.6f} mean_gpd_minus_stretched_test_ll={mean_ll_diff:.9f}"
     )
-    print("VERDICT", verdict)
+    print("WITHIN_SAMPLE_VERDICT", within)
+    print("GLOBAL_VERDICT", global_verdict)
     return 0
 
 
