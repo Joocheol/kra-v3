@@ -66,6 +66,19 @@ def flatten_by_year(
     return {year: np.asarray(vals, dtype=float) for year, vals in out.items()}
 
 
+def load_uncapped_odds(data: pathlib.Path) -> list[tuple[int, float]]:
+    """Reusable cell-level odds sample from races with no real 9999.9 cell."""
+    races = load_races(data / "races.jsonl.gz")
+    wanted = primary_race_ids(data / "trifecta_feasible_sets.csv.gz")
+    grids = load_grids(data, races, wanted)
+    by_year = flatten_by_year(grids, races)
+    return [
+        (int(year), float(value))
+        for year in sorted(by_year)
+        for value in by_year[year]
+    ]
+
+
 def predict_exceedance(test_values: np.ndarray, u: float, v: float, zeta: float) -> tuple[int, float, float]:
     n_u = int(np.sum(test_values >= u))
     actual = int(np.sum(test_values >= v))
