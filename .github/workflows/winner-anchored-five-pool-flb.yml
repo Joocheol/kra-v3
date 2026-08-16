@@ -1,0 +1,15 @@
+name: Winner-anchored five-pool FLB diagnostic
+on:
+  pull_request:
+    paths:
+      - 'tests/test_winner_anchored_five_pool_flb.py'
+      - '.github/workflows/winner-anchored-five-pool-flb.yml'
+jobs:
+  diagnostic:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
+      - run: python3 -m unittest tests.test_winner_anchored_five_pool_flb -v
