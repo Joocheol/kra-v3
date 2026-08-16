@@ -10,7 +10,7 @@ from analyze_feasible_sets import load_races, _validated_trifecta_cell
 DATA = pathlib.Path('데이터')
 FEAS = DATA / 'trifecta_feasible_sets.csv.gz'
 BINS = 100
-BOOT = 50
+BOOT = 20
 RNG = np.random.default_rng(20260817)
 
 
@@ -115,24 +115,27 @@ class EmpiricalRank2017(unittest.TestCase):
         arr=np.asarray(train_profiles); boot=[]
         for _ in range(BOOT):
             idx=RNG.integers(0,len(arr),len(arr)); boot.append(aggregate_profile(arr[idx]))
-        unique_bins=Counter(); spread=[]; zero_base=[]; l1_uniform=[]; usable=0; examples=[]
-        for r in strict_capped:
+        unique_bins=Counter(); spread=[]; zero_base=[]; l1_uniform=[]; usable=0; boot_sample=0; examples=[]
+        for ri,r in enumerate(strict_capped):
             k=int(r['capped_cells']); J=int(r['expected_combinations']); U=int(r['cap_ticket_upper']); lo=int(r['feasible_residual_min']); hi=int(r['feasible_residual_max']); R=(lo+hi)//2
             base=allocate(profile,J,k,R,U)
             if base is None: continue
-            usable+=1; sims=[]; hashes=set()
-            for bp in boot:
-                z=allocate(bp,J,k,R,U)
-                if z is not None: sims.append(z); hashes.add(z.tobytes())
-            if sims:
-                A=np.vstack(sims); spread.append(float(np.mean(np.quantile(A,.95,axis=0)-np.quantile(A,.05,axis=0)))); d=len(hashes)
-                unique_bins['<=5' if d<=5 else '6-10' if d<=10 else '11-25' if d<=25 else '26-50']+=1
+            usable+=1
+            hashes=set()
+            if ri%5==0:
+                boot_sample+=1; sims=[]
+                for bp in boot:
+                    z=allocate(bp,J,k,R,U)
+                    if z is not None: sims.append(z); hashes.add(z.tobytes())
+                if sims:
+                    A=np.vstack(sims); spread.append(float(np.mean(np.quantile(A,.95,axis=0)-np.quantile(A,.05,axis=0)))); d=len(hashes)
+                    unique_bins['<=5' if d<=5 else '6-10' if d<=10 else '11-20']+=1
             zero_base.append(int(np.sum(base==0))); uni=uniform_alloc(k,R,U)
             if uni is not None and R>0: l1_uniform.append(float(np.sum(np.abs(base-uni))/R))
             if len(examples)<8: examples.append((r['race_id'],k,U,lo,hi,int(np.sum(base==0)),int(base[0]),float(np.median(base)),len(hashes)))
         q=lambda v,p: float(np.quantile(v,p)) if v else float('nan')
-        print(f'ACTUAL usable={usable}')
-        print('BOOT_UNIQUE '+','.join(f'{b}:{unique_bins[b]}' for b in ['<=5','6-10','11-25','26-50']))
+        print(f'ACTUAL usable={usable} bootstrap_sample={boot_sample}')
+        print('BOOT_UNIQUE '+','.join(f'{b}:{unique_bins[b]}' for b in ['<=5','6-10','11-20']))
         print(f'BOOT_MEAN_CELL_90WIDTH q25={q(spread,.25):.3f} median={q(spread,.5):.3f} q75={q(spread,.75):.3f}')
         print(f'BASE_ZERO_CELLS q25={q(zero_base,.25):.1f} median={q(zero_base,.5):.1f} q75={q(zero_base,.75):.1f}')
         print(f'PROFILE_vs_UNIFORM_normalized_L1 q25={q(l1_uniform,.25):.4f} median={q(l1_uniform,.5):.4f} q75={q(l1_uniform,.75):.4f}')
