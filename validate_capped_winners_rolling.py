@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 """Rolling-origin external validation on frozen 2023--2025 capped winners.
 
-Official winning payouts are outcome-selected and never used for fitting.  For
-each target year y in 2023, 2024, 2025, cross-pool allocation coefficients are
-estimated only from artificial masking in real capped races from earlier years
+Official winning payouts are outcome-selected and never used for fitting. For
+each target year y in 2023, 2024, 2025, allocation coefficients are estimated
+only from artificial masking in real capped races from earlier years
 (2022..y-1), then applied to official capped winners in year y.
-
-The goal is not to claim winner-selected accuracy as representative of all cap
-cells.  It is a larger external stress test of whether point allocation improves
-over uniform when the training regime and chronology are correct.
 """
 from __future__ import annotations
 
@@ -22,7 +18,7 @@ from analyze_masked_reconstruction import load_cross_pool_odds, load_grids
 from analyze_capped_regime_masking import build_experiment, fit_coefficients
 from check_coherence import load_month
 from validate_capped_regime_winners_all8 import (
-    CROSS_COLUMNS, EXACTA_COL, probabilities_for_caps, project,
+    RICH_COL, EXACTA_COL, probabilities_for_caps, project,
 )
 
 DATA=pathlib.Path("데이터")
@@ -64,7 +60,7 @@ def main()->int:
             e=build_experiment(races[rid],grids[rid],cross.get(rid,{}),THRESHOLD)
             if e is not None:train.append(e)
         if not train:raise ValueError(f"no training for {year}")
-        rich,_=fit_coefficients(train,CROSS_COLUMNS)
+        rich,_=fit_coefficients(train,RICH_COL)
         ex,_=fit_coefficients(train,EXACTA_COL)
 
         target=[t for t in truths if t["year"]==year]
