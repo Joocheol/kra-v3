@@ -37,15 +37,15 @@ def load_2017_odds(wanted):
 
 
 def reconstruct_uncapped(sales, odds):
-    total = sales // 100
-    lo=[]; hi=[]; target=[]
+    # For 2017 the historical board and sales snapshots do not always obey one
+    # exact race-total identity.  Here we need only the sorted *shape*, so use
+    # each uncapped cell's exact inverse interval midpoint independently.
+    mids=[]
     for d in odds:
-        c = displayed_ticket_interval(sales, d)
+        c=displayed_ticket_interval(sales,d)
         if not c: return None
-        lo.append(c.start); hi.append(c.stop-1); target.append(0.73*total/float(d))
-    lo=np.asarray(lo,dtype=np.int64); hi=np.asarray(hi,dtype=np.int64)
-    if lo.sum() > total or hi.sum() < total: return None
-    x = bounded_integer_projection(np.asarray(target,float),lo,hi,total)
+        mids.append((c.start + c.stop - 1)/2.0)
+    x=np.rint(np.asarray(mids,float)).astype(np.int64)
     return np.sort(x)[::-1]
 
 
