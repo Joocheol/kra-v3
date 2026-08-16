@@ -36,9 +36,6 @@ jobs:
           actual="$(gzip -cd 데이터/outcome_evaluation.csv.gz | sha256sum | awk '{print $1}')"
           expected="$(tr -d '[:space:]' < 데이터/outcome_evaluation.sha256)"
           test "$actual" = "$expected"
-          echo "$actual"
-      - name: Show outcome report
-        run: cat findings/outcome_evaluation.md
 
   outcome-robustness:
     runs-on: ubuntu-latest
@@ -62,8 +59,6 @@ jobs:
           <(gzip -cd 데이터/outcome_robustness.csv.gz)
       - name: Verify frozen robustness report
         run: git diff --exit-code -- findings/outcome_robustness.md
-      - name: Show robustness report
-        run: cat findings/outcome_robustness.md
 
   masked-reconstruction:
     runs-on: ubuntu-latest
