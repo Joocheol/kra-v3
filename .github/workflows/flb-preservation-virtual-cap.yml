@@ -1,0 +1,20 @@
+name: FLB preservation virtual cap
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  flb-preservation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Install analysis dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
+      - name: Test five-pool FLB preservation
+        run: python3 analyze_flb_preservation_virtual_cap.py
