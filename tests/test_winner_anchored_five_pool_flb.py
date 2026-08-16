@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import csv, gzip, math, pathlib, unittest
-from collections import defaultdict
 from decimal import Decimal
 import numpy as np
 
@@ -45,9 +44,9 @@ def anchored_completion(race, odds, info, scenario, anchor):
     residual=int(info[scenario]); y=int(anchor['tickets']); w=anchor['combo']
     if w not in capped: raise ValueError('anchor winner is not capped')
     if y<0 or y>info['cap_upper'] or y>residual: return None
-    uncapped_counts=bounded_integer_projection(np.asarray(target),np.asarray(lo),np.asarray(hi),total-residual)
     other=[c for c in capped if c!=w]; rem=residual-y
     if rem<0 or rem>len(other)*info['cap_upper']: return None
+    uncapped_counts=bounded_integer_projection(np.asarray(target),np.asarray(lo),np.asarray(hi),total-residual)
     if other:
         other_counts=bounded_integer_projection(
             np.full(len(other),rem/len(other),dtype=float),
@@ -75,49 +74,55 @@ def realised_keys(race):
 
 
 def tail_contrib(pool,key,frac):
-    ordered=sorted(pool.items(),key=lambda kv:kv[1]) # smallest probability = longest shot
+    ordered=sorted(pool.items(),key=lambda kv:kv[1])
     k=max(1,int(math.ceil(frac*len(ordered))))
-    chosen=dict(ordered[:k]); e=sum(chosen.values()); o=1.0 if key in chosen else 0.0
-    return o,e
+    chosen=dict(ordered[:k]); return (1.0 if key in chosen else 0.0),sum(chosen.values())
 
 
 class WinnerAnchoredFivePool(unittest.TestCase):
     def test_anchor(self):
         races=load_race_records(DATA/'races.jsonl.gz'); feasible=load_feasible(DATA/'trifecta_feasible_sets.csv.gz')
-        anchors=load_anchor_truth(); by_month={}
-        print('WINNER_ANCHORED_FIVE_POOL_FLB')
-        print(f'anchors_loaded={len(anchors)} strict_feasible={len(feasible)}')
-        feas_by_s={s:0 for s in SCENARIOS}; exact_checks=[]
-        # Pooled Rmid tail statistics before/after replacing eligible winner-capped races by anchored completions.
-        agg={name:{t:[0.,0.] for t in TAILS} for name in ('base','anchor') for _ in [0]}
-        # restructure per target
+        anchors=load_anchor_truth(); capped_ids=[rid for rid in sorted(feasible) if int(feasible[rid]['capped_cells'])>0]
+        by_month={}; feas_by_s={s:0 for s in SCENARIOS}; exact_checks=[]; tightened=[]
         agg={name:{target:{t:[0.,0.] for t in TAILS} for target in TARGETS} for name in ('base','anchor')}
         changed=0; used_anchor=0
-        for i,rid in enumerate(sorted(feasible),1):
+        print('WINNER_ANCHORED_FIVE_POOL_FLB')
+        print(f'anchors_loaded={len(anchors)} capped_strict_sample={len(capped_ids)}')
+        for rid in capped_ids:
             race=races[rid]; month=race['date'][:7]
             if month not in by_month: by_month[month]=load_month(DATA,month)
             market=by_month[month].get(rid)
             if market is None or not market['trifecta']: continue
-            base=completed_trifecta(race,market['trifecta'],feasible[rid],'residual_mid')
+            info=feasible[rid]
+            base=completed_trifecta(race,market['trifecta'],info,'residual_mid')
             anchored=base; a=anchors.get(rid)
             if a:
+                y=int(a['tickets']); k=int(info['capped_cells']); U=int(info['cap_upper'])
+                old_lo=int(info['residual_min']); old_hi=int(info['residual_max'])
+                new_lo=max(old_lo,y); new_hi=min(old_hi,y+(k-1)*U)
+                tightened.append((rid,old_lo,old_hi,new_lo,new_hi,y,k,U))
                 for s in SCENARIOS:
-                    z=anchored_completion(race,market['trifecta'],feasible[rid],s,a)
+                    z=anchored_completion(race,market['trifecta'],info,s,a)
                     if z is not None: feas_by_s[s]+=1
-                z=anchored_completion(race,market['trifecta'],feasible[rid],'residual_mid',a)
+                z=anchored_completion(race,market['trifecta'],info,'residual_mid',a)
                 if z is not None:
                     anchored=z; used_anchor+=1
-                    exact_checks.append((rid,a['tickets'],int(round(anchored[a['combo']]*( _won(race['sales']['삼쌍승식'])//100 ))),a['odds']))
-                    if any(abs(anchored[k]-base[k])>1e-15 for k in base): changed+=1
+                    total=_won(race['sales']['삼쌍승식'])//100
+                    exact_checks.append((rid,y,int(round(anchored[a['combo']]*total)),a['odds'],y/total))
+                    if any(abs(anchored[key]-base[key])>1e-15 for key in base): changed+=1
             keys=realised_keys(race); bp=pools(base); ap=pools(anchored)
             for target in TARGETS:
                 for t in TAILS:
                     bo,be=tail_contrib(bp[target],keys[target],t); ao,ae=tail_contrib(ap[target],keys[target],t)
                     agg['base'][target][t][0]+=bo; agg['base'][target][t][1]+=be
                     agg['anchor'][target][t][0]+=ao; agg['anchor'][target][t][1]+=ae
-        print('ANCHOR_FEASIBILITY '+','.join(f'{s}={feas_by_s[s]}' for s in SCENARIOS))
+        reductions=[(hi-lo)-(nhi-nlo) for _,lo,hi,nlo,nhi,*_ in tightened]
+        print('ANCHOR_FEASIBILITY '+','.join(f'{s}={feas_by_s[s]}/{len(anchors)}' for s in SCENARIOS))
         print(f'Rmid_anchors_used={used_anchor} changed_races={changed}')
-        for rid,y,y2,od in exact_checks[:10]: print(f'ANCHOR_EXAMPLE race={rid} actual_odds={od:.1f} fixed_tickets={y} recovered={y2}')
+        print(f'RESIDUAL_INTERVAL tightened_races={sum(x>0 for x in reductions)}/{len(reductions)} total_width_reduction={sum(reductions)} max_width_reduction={max(reductions)}')
+        for row,red in zip(tightened,reductions):
+            if red>0: print(f'TIGHTEN race={row[0]} old={row[1]}-{row[2]} anchored={row[3]}-{row[4]} winner_tickets={row[5]} k={row[6]} U={row[7]} reduction={red}')
+        for rid,y,y2,od,share in exact_checks[:10]: print(f'ANCHOR_EXAMPLE race={rid} actual_odds={od:.1f} fixed_tickets={y} recovered={y2} exact_share={share:.8f}')
         print('target,tail,base_OE,anchored_OE,delta,base_E,anchored_E')
         max_delta=0.0
         for target in TARGETS:
@@ -126,7 +131,8 @@ class WinnerAnchoredFivePool(unittest.TestCase):
                 b=bo/be; a=ao/ae; d=a-b; max_delta=max(max_delta,abs(d))
                 print(f'{target},{t:.2f},{b:.6f},{a:.6f},{d:+.6f},{be:.6f},{ae:.6f}')
         print(f'MAX_ABS_OE_DELTA={max_delta:.6f}')
+        self.assertEqual(len(capped_ids),7546)
         self.assertGreaterEqual(len(anchors),40)
         self.assertEqual(used_anchor,len(anchors))
-        self.assertTrue(all(y==y2 for _,y,y2,_ in exact_checks))
+        self.assertTrue(all(y==y2 for _,y,y2,_,_ in exact_checks))
         self.fail('intentional diagnostic stop after output')
