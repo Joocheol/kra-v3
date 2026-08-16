@@ -45,6 +45,18 @@ jobs:
       - name: Evaluate Gabaix-Ibragimov Rank-1/2 tail stability
         run: python3 analyze_gabaix_rank_half.py
 
+  tail-family-competition:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install analysis dependencies
+        run: python3 -m pip install --disable-pip-version-check -r requirements-analysis.txt
+      - name: Compare truncated tail families out of sample
+        run: python3 analyze_tail_family_competition.py
+
   joint-reconstruction:
     runs-on: ubuntu-latest
     timeout-minutes: 15
