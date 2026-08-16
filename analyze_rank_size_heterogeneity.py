@@ -2,28 +2,26 @@
 """Stage-4 Gabaix/Zipf diagnostic: race-level rank-size heterogeneity.
 
 This evaluates the user's original idea at the race level rather than pooling
-all odds cells.  Two complementary questions are asked:
+all odds cells. Two complementary questions are asked:
 
 1. On entirely uncapped races, do normalized rank-size/quantile curves collapse
    to a stable common template that predicts held-out 2025 tail quantiles?
 2. Using threshold exceedance counts that are exactly observable even for
    capped races (a 9999.9 cell is certainly above 3000/5000/7000), do capped
-   and uncapped races already have different *pre-cap* local tail slopes?
+   and uncapped races already have different pre-cap local tail slopes?
 
-If the second answer is yes, learning one global tail law only from uncapped
-races is selection-biased even if the within-uncapped template looks stable.
+Only the trifecta (3Both) grids are loaded; no lower-order pool is needed.
 """
 from __future__ import annotations
 
 import math
 import pathlib
 import statistics
-from collections import defaultdict
 
 import numpy as np
 
-from analyze_cross_market import _won, load_feasible, load_race_records
-from check_coherence import load_month
+from analyze_cross_market import _won, load_feasible
+from analyze_masked_reconstruction import load_grids, load_races
 
 DATA = pathlib.Path("데이터")
 THRESHOLDS = (3000.0, 5000.0, 7000.0)
@@ -54,20 +52,14 @@ def describe(values: list[float]) -> str:
 
 
 def main() -> int:
-    races = load_race_records(DATA / "races.jsonl.gz")
+    races = load_races(DATA / "races.jsonl.gz")
     feasible = load_feasible(DATA / "trifecta_feasible_sets.csv.gz")
-    months: dict[str, dict] = {}
+    grids = load_grids(DATA, races, set(feasible))
     rows = []
 
     for idx, race_id in enumerate(sorted(feasible), 1):
         race = races[race_id]
-        month = race["date"][:7]
-        if month not in months:
-            months[month] = load_month(DATA, month)
-        market = months[month].get(race_id)
-        if market is None or not market["trifecta"]:
-            raise ValueError(f"{race_id}: missing trifecta market")
-        odds = np.asarray(list(market["trifecta"].values()), dtype=float)
+        odds = np.asarray([float(value) for _, value in grids[race_id]], dtype=float)
         K = len(odds)
         counts = {u: int(np.sum(odds >= u)) for u in THRESHOLDS}
         z35 = local_slope(counts[3000.0], counts[5000.0], 3000.0, 5000.0)
@@ -101,9 +93,9 @@ def main() -> int:
             **{f"q{q}": quant[q] for q in TARGET_Q},
         })
         if idx % 1000 == 0:
-            print(f"# scanned {idx}/{len(feasible)}", flush=True)
+            print(f"# summarized {idx}/{len(feasible)}", flush=True)
 
-    # ---- Part A: normalized quantile template on uncapped races ----------
+    # Part A: common normalized template learned only on uncapped races.
     train = [r for r in rows if not r["capped"] and r["year"] <= 2024]
     test = [r for r in rows if not r["capped"] and r["year"] == 2025]
     template = {
@@ -114,14 +106,12 @@ def main() -> int:
     print("target_q,train_n,template_normalized,test_n,median_abs_log_error,p90_abs_log_error,median_relative_odds_error,p90_relative_odds_error")
     template_errors = {}
     for q in TARGET_Q:
-        abslog = []
-        rel = []
+        abslog, rel = [], []
         for r in test:
             scale = float(r["q90"]) - float(r["q50"])
             pred_log = float(r["q50"]) + template[q] * scale
             truth_log = float(r[f"q{q}"])
-            e = abs(pred_log - truth_log)
-            abslog.append(e)
+            abslog.append(abs(pred_log - truth_log))
             rel.append(abs(math.exp(pred_log - truth_log) - 1.0))
         a = np.asarray(abslog)
         rr = np.asarray(rel)
@@ -139,7 +129,7 @@ def main() -> int:
         q25, med, q75 = np.quantile(vals, [0.25, 0.5, 0.75])
         print(f"{q:.3f},{len(vals)},{q25:.6f},{med:.6f},{q75:.6f},{q75-q25:.6f}")
 
-    # ---- Part B: tail slopes identifiable in both capped and uncapped -----
+    # Part B: local threshold slopes identifiable in both capped and uncapped races.
     print("\n# local threshold slopes by capped status")
     print("group,races,z35,z57,curvature")
     for capped in (False, True):
@@ -150,8 +140,6 @@ def main() -> int:
         curv = [float(r["curvature"]) for r in group if r["curvature"] is not None]
         print(f"{name},{len(group)},{describe(z35)},{describe(z57)},{describe(curv)}")
 
-    # Strata among uncapped races: if common shape exists, these should not
-    # move dramatically merely with field size or turnover.
     uncapped = [r for r in rows if not r["capped"]]
     turnovers = np.asarray([float(r["turnover"]) for r in uncapped])
     t1, t2 = np.quantile(turnovers, [1/3, 2/3])
@@ -168,10 +156,6 @@ def main() -> int:
             curv = [float(r["curvature"]) for r in sub if r["curvature"] is not None]
             print(f"{dim},{g},{len(sub)},{describe(curv)}")
 
-    # Compact diagnostic verdict.  The common normalized template is retained
-    # only if held-out q99 median error <=15% and p90 <=35%.  Global transfer
-    # from uncapped to capped races is rejected if median local curvature differs
-    # by more than 0.5 between capped and uncapped groups.
     q99_med, q99_p90 = template_errors[0.99]
     template_ok = q99_med <= 0.15 and q99_p90 <= 0.35
     unc_curv = [float(r["curvature"]) for r in rows if not r["capped"] and r["curvature"] is not None]
