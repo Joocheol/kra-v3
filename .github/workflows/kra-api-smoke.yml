@@ -35,21 +35,18 @@ jobs:
           tests = [
               {
                   "name": "sales_and_dividend_rate",
-                  "url": "https://apis.data.go.kr/B551015/API179_1/salesAndDividendRate_1",
+                  "url": "http://apis.data.go.kr/B551015/API179_1/salesAndDividendRate_1",
                   "params": {"pageNo": "1", "numOfRows": "1", "_type": "json"},
-                  "expected_hint": ["sales", "dividend", "amt", "pool", "rc"],
               },
               {
                   "name": "integrated_dividend_rate",
-                  "url": "https://apis.data.go.kr/B551015/API160_1/integratedInfo_1",
+                  "url": "http://apis.data.go.kr/B551015/API160_1/integratedInfo_1",
                   "params": {"pageNo": "1", "numOfRows": "1", "_type": "json"},
-                  "expected_hint": ["odds", "pool", "rc"],
               },
               {
                   "name": "race_detail_result",
-                  "url": "https://apis.data.go.kr/B551015/API214_1/RaceDetailResult_1",
+                  "url": "http://apis.data.go.kr/B551015/API214_1/RaceDetailResult_1",
                   "params": {"pageNo": "1", "numOfRows": "1", "_type": "json"},
-                  "expected_hint": ["rank", "horse", "rc"],
               },
           ]
 
@@ -103,40 +100,33 @@ jobs:
                   failures.append(test["name"])
                   continue
 
-              parsed = None
-              parse_kind = None
               try:
                   parsed = json.loads(text)
-                  parse_kind = "json"
-              except Exception:
-                  try:
-                      parsed = ET.fromstring(text)
-                      parse_kind = "xml"
-                  except Exception as exc:
-                      print(f"ERROR: response is neither JSON nor XML: {exc}")
-                      failures.append(test["name"])
-                      continue
-
-              print(f"parse={parse_kind}")
-              if parse_kind == "json":
                   header = get_nested(parsed, "response", "header") or {}
                   body = get_nested(parsed, "response", "body") or {}
                   items = normalize_items(get_nested(body, "items"))
+                  print("parse=json")
                   print(f"resultCode={header.get('resultCode')}")
                   print(f"resultMsg={header.get('resultMsg')}")
                   print(f"totalCount={body.get('totalCount')}")
                   print(f"item_count={len(items)}")
                   if items and isinstance(items[0], dict):
-                      print("first_item_fields=" + ",".join(sorted(items[0].keys())[:30]))
+                      print("first_item_fields=" + ",".join(sorted(items[0].keys())[:40]))
                   if str(header.get("resultCode")) not in {"00", "0", "None"}:
                       print("ERROR: API resultCode is not success")
                       failures.append(test["name"])
                   elif len(items) == 0:
                       print("WARN: call succeeded but returned zero items")
-              else:
-                  result_code = parsed.findtext(".//resultCode")
-                  result_msg = parsed.findtext(".//resultMsg")
-                  items = parsed.findall(".//item")
+                  continue
+              except Exception:
+                  pass
+
+              try:
+                  root = ET.fromstring(text)
+                  result_code = root.findtext(".//resultCode")
+                  result_msg = root.findtext(".//resultMsg")
+                  items = root.findall(".//item")
+                  print("parse=xml")
                   print(f"resultCode={result_code}")
                   print(f"resultMsg={result_msg}")
                   print(f"item_count={len(items)}")
@@ -145,6 +135,9 @@ jobs:
                       failures.append(test["name"])
                   elif len(items) == 0:
                       print("WARN: call succeeded but returned zero items")
+              except Exception as exc:
+                  print(f"ERROR: response is neither JSON nor XML: {exc}")
+                  failures.append(test["name"])
 
           if failures:
               print("\nFAILED_ENDPOINTS=" + ",".join(failures))
