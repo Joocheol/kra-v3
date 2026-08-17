@@ -25,6 +25,18 @@ class ParseOddsTests(unittest.TestCase):
             [((15, 3, 4), Decimal("391736.8"))],
         )
 
+    def test_parses_parenthesized_horse_number(self) -> None:
+        self.assertEqual(
+            parse_odds("(16)-5.5", "단승식"),
+            [((16,), Decimal("5.5"))],
+        )
+
+    def test_parses_mixed_number_styles(self) -> None:
+        self.assertEqual(
+            parse_odds("⑮(16)④-12345.6", "삼쌍승식"),
+            [((15, 16, 4), Decimal("12345.6"))],
+        )
+
     def test_year_range(self) -> None:
         self.assertEqual(year_range(2022, 2025), [2022, 2023, 2024, 2025])
 

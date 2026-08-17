@@ -70,9 +70,10 @@ TAKE_FRACTION = {
     "삼쌍승식": Fraction(73, 100),
 }
 POOL_MULTIPLIER = {"복연승식": 3}
-_CIRCLED_RE = re.compile(r"[\u2460-\u2473]")
+_HORSE_TOKEN = r"(?:[\u2460-\u2473]|\([0-9]{1,2}\))"
+_HORSE_TOKEN_RE = re.compile(_HORSE_TOKEN)
 _PAYOUT_RE = re.compile(
-    r"(?P<combo>(?:[\u2460-\u2473]\s*)+)\s*-\s*"
+    rf"(?P<combo>(?:{_HORSE_TOKEN}\s*)+)\s*-\s*"
     r"(?P<odds>[0-9][0-9,]*(?:\.[0-9]+)?)"
 )
 
@@ -92,10 +93,10 @@ MISSING_FIELDS = [
 ]
 
 
-def horse_number(char: str) -> int:
-    value = ord(char) - 0x245F
+def horse_number(token: str) -> int:
+    value = int(token[1:-1]) if token.startswith("(") else ord(token) - 0x245F
     if not 1 <= value <= 20:
-        raise ValueError(f"not a circled horse number: {char!r}")
+        raise ValueError(f"not a horse number token: {token!r}")
     return value
 
 
@@ -104,7 +105,7 @@ def parse_odds(raw: object, pool: str) -> list[tuple[tuple[int, ...], Decimal]]:
     text = "" if raw is None else str(raw).strip()
     out: list[tuple[tuple[int, ...], Decimal]] = []
     for match in _PAYOUT_RE.finditer(text):
-        combo = tuple(horse_number(c) for c in _CIRCLED_RE.findall(match["combo"]))
+        combo = tuple(horse_number(token) for token in _HORSE_TOKEN_RE.findall(match["combo"]))
         if len(combo) != POOL_SIZE[pool]:
             raise ValueError(
                 f"{pool}: expected {POOL_SIZE[pool]} horses, got {combo!r} in {text!r}"
@@ -344,6 +345,18 @@ def write_csv(path: pathlib.Path, rows: list[dict[str, object]], fields: list[st
             writer.writerows(rows)
 
 
+def write_jsonl_gz(path: pathlib.Path, rows: list[dict]) -> None:
+    """Preserve raw API rows before parsing so a format error is diagnosable."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as raw:
+        tmp = pathlib.Path(raw.name)
+        with gzip.GzipFile(fileobj=raw, mode="wb", filename="", mtime=0) as zipped:
+            with io.TextIOWrapper(zipped, encoding="utf-8", newline="") as text:
+                for row in rows:
+                    text.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+    tmp.replace(path)
+
+
 def maxima(payouts: list[dict[str, object]]) -> list[dict[str, object]]:
     out = []
     for pool in POOL_ORDER:
@@ -460,12 +473,13 @@ def main() -> int:
             if args.pause:
                 time.sleep(args.pause)
 
+    args.out.mkdir(parents=True, exist_ok=True)
+    write_jsonl_gz(args.out / "openapi179_raw.jsonl.gz", raw_rows)
     rows, payouts = normalize_rows(raw_rows)
     maximum_rows = maxima(payouts)
     races = load_races(args.races)
     missing = find_missing_candidates(races, rows, payouts)
 
-    args.out.mkdir(parents=True, exist_ok=True)
     write_csv(args.out / "openapi179_rows.csv.gz", rows, ROW_FIELDS)
     write_csv(args.out / "openapi179_payouts.csv.gz", payouts, PAYOUT_FIELDS)
     write_csv(args.out / "openapi179_maxima.csv", maximum_rows, PAYOUT_FIELDS)

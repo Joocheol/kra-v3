@@ -54,6 +54,7 @@ jobs:
         run: cat outputs/openapi179/openapi179_report.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload audit results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: kra-openapi179-audit
