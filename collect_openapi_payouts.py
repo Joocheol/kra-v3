@@ -357,6 +357,11 @@ def write_jsonl_gz(path: pathlib.Path, rows: list[dict]) -> None:
     tmp.replace(path)
 
 
+def read_jsonl_gz(path: pathlib.Path) -> list[dict]:
+    with gzip.open(path, "rt", encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle]
+
+
 def maxima(payouts: list[dict[str, object]]) -> list[dict[str, object]]:
     out = []
     for pool in POOL_ORDER:
@@ -445,6 +450,10 @@ def main() -> int:
     parser.add_argument("--out", type=pathlib.Path, default=pathlib.Path("outputs/openapi179"))
     parser.add_argument("--races", type=pathlib.Path, default=pathlib.Path("데이터/races.jsonl.gz"))
     parser.add_argument("--pause", type=float, default=0.05, help="seconds between base requests")
+    parser.add_argument(
+        "--resume", action="store_true",
+        help="reuse completed year/meet checkpoints in the output directory",
+    )
     args = parser.parse_args()
 
     key = urllib.parse.unquote(os.environ.get("DATA_GO_KR_SERVICE_KEY", "").strip())
@@ -455,25 +464,35 @@ def main() -> int:
     if not meets or set(meets) - set(MEET_NAMES):
         parser.error("--meets must contain only 1,2,3")
 
+    args.out.mkdir(parents=True, exist_ok=True)
+    checkpoint_dir = args.out / "checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
     raw_rows = []
     total_groups = len(years) * len(meets)
     request_count = 0
     done = 0
     for year in years:
         for meet in meets:
-            batch, pages = fetch_year(key, year, meet)
+            checkpoint = checkpoint_dir / f"{year}_{meet}.jsonl.gz"
+            if args.resume and checkpoint.exists():
+                batch = read_jsonl_gz(checkpoint)
+                pages = 0
+                source = "checkpoint"
+            else:
+                batch, pages = fetch_year(key, year, meet)
+                write_jsonl_gz(checkpoint, batch)
+                source = f"{pages} request(s)"
             raw_rows.extend(batch)
             request_count += pages
             done += 1
             print(
                 f"[{done:>2}/{total_groups}] {year} {MEET_NAMES[meet]}: "
-                f"{len(batch):>5} rows, {pages} request(s)",
+                f"{len(batch):>5} rows, {source}",
                 file=sys.stderr,
             )
             if args.pause:
                 time.sleep(args.pause)
 
-    args.out.mkdir(parents=True, exist_ok=True)
     write_jsonl_gz(args.out / "openapi179_raw.jsonl.gz", raw_rows)
     rows, payouts = normalize_rows(raw_rows)
     maximum_rows = maxima(payouts)

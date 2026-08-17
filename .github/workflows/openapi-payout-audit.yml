@@ -44,11 +44,22 @@ jobs:
         run: python3 -m unittest discover -s tests -p 'test_openapi_payouts.py' -v
 
       - name: Collect realized payouts and audit missing winners
+        shell: bash
         run: |
-          python3 collect_openapi_payouts.py \
-            --start-year "${{ inputs.start_year || '2016' }}" \
-            --end-year "${{ inputs.end_year || '2025' }}" \
-            --out outputs/openapi179
+          for attempt in 1 2 3; do
+            if python3 collect_openapi_payouts.py \
+              --start-year "${{ inputs.start_year || '2016' }}" \
+              --end-year "${{ inputs.end_year || '2025' }}" \
+              --out outputs/openapi179 \
+              --resume; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            echo "API179 attempt $attempt failed; resuming from checkpoints" >&2
+            sleep 30
+          done
 
       - name: Show report in job summary
         run: cat outputs/openapi179/openapi179_report.md >> "$GITHUB_STEP_SUMMARY"
