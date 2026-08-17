@@ -2,8 +2,9 @@
 """Check KRA OpenAPI consistency against archived race identifiers.
 
 This script is intentionally conservative with API calls.  It reads the race
-overview API one year at a time and checks whether race IDs known from the
-archive are present in the official API.
+overview API by year and meet, because the provider defaults to Seoul when
+``meet`` is omitted.  For the archived years currently in scope this means
+at most 3 calls per year, before pagination.
 
 Typical use:
 
@@ -29,6 +30,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 API_BASE = "http://apis.data.go.kr/B551015/API3_1/raceInfo_1"
+MEET_CODES = (1, 2, 3)
 
 MEET_NAME_TO_CODE = {
     "서울": 1,
@@ -150,7 +152,14 @@ def api_item_to_race_id(item: dict) -> RaceId:
     return RaceId(date=date, meet=parse_meet(item["meet"]), rc_no=int(item["rcNo"]))
 
 
-def fetch_year_overview(year: int, *, page_size: int, timeout: float, retries: int) -> list[dict]:
+def fetch_year_meet_overview(
+    year: int,
+    meet: int,
+    *,
+    page_size: int,
+    timeout: float,
+    retries: int,
+) -> list[dict]:
     page_no = 1
     all_items: list[dict] = []
     total_count: int | None = None
@@ -160,20 +169,39 @@ def fetch_year_overview(year: int, *, page_size: int, timeout: float, retries: i
                 "pageNo": str(page_no),
                 "numOfRows": str(page_size),
                 "rc_year": str(year),
+                "meet": str(meet),
             },
             timeout=timeout,
             retries=retries,
         )
         if total_count is None:
             total_count = int(body.get("totalCount", 0) or 0)
-            print(f"api_year={year} totalCount={total_count} page_size={page_size}")
+            print(f"api_year={year} meet={meet} totalCount={total_count} page_size={page_size}")
         all_items.extend(x for x in items if isinstance(x, dict))
-        print(f"year={year} fetched_page={page_no} page_items={len(items)} cumulative={len(all_items)}")
+        print(
+            f"year={year} meet={meet} fetched_page={page_no} "
+            f"page_items={len(items)} cumulative={len(all_items)}"
+        )
         if len(all_items) >= total_count:
             break
         if not items:
             raise RuntimeError("pagination stopped with empty page before totalCount was reached")
         page_no += 1
+    return all_items
+
+
+def fetch_year_overview(year: int, *, page_size: int, timeout: float, retries: int) -> list[dict]:
+    all_items: list[dict] = []
+    for meet in MEET_CODES:
+        all_items.extend(
+            fetch_year_meet_overview(
+                year,
+                meet,
+                page_size=page_size,
+                timeout=timeout,
+                retries=retries,
+            )
+        )
     return all_items
 
 
@@ -184,7 +212,10 @@ def check_year(year: int, archive_ids_all: set[RaceId], *, page_size: int, timeo
 
     api_items = fetch_year_overview(year, page_size=page_size, timeout=timeout, retries=retries)
     api_ids = {api_item_to_race_id(item) for item in api_items}
+    print(f"api_raw_row_count={len(api_items)}")
     print(f"api_unique_race_count={len(api_ids)}")
+    if len(api_items) != len(api_ids):
+        print(f"WARN duplicate_api_rows={len(api_items) - len(api_ids)}")
 
     by_meet: dict[int, int] = {}
     for rid in api_ids:
