@@ -16,7 +16,7 @@ jobs:
     env:
       DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
     steps:
-      - name: Check KRA OpenAPI endpoints
+      - name: Check Dropbox race-id sample against KRA APIs
         run: |
           python3 - <<'PY'
           import json
@@ -25,45 +25,29 @@ jobs:
           import urllib.error
           import urllib.parse
           import urllib.request
-          import xml.etree.ElementTree as ET
 
           key = os.environ.get("DATA_GO_KR_SERVICE_KEY", "")
           if not key:
               print("ERROR: DATA_GO_KR_SERVICE_KEY secret is missing or empty")
               sys.exit(1)
 
-          tests = [
-              {
-                  "name": "race_overview_api3",
-                  "url": "http://apis.data.go.kr/B551015/API3_1/raceInfo_1",
-                  "params": {"pageNo": "1", "numOfRows": "1", "meet": "1", "rc_date": "20190504", "rc_no": "1", "_type": "json"},
-                  "required_fields_any": ["rcDate", "rcNo", "meet", "totAmt"],
-              },
-              {
-                  "name": "sales_and_dividend_rate",
-                  "url": "http://apis.data.go.kr/B551015/API179_1/salesAndDividendRate_1",
-                  "params": {"pageNo": "1", "numOfRows": "1", "meet": "1", "rc_date": "20190504", "rc_no": "1", "_type": "json"},
-                  "required_fields_any": ["amt", "odds", "pool"],
-              },
-              {
-                  "name": "integrated_dividend_rate",
-                  "url": "http://apis.data.go.kr/B551015/API160_1/integratedInfo_1",
-                  "params": {"pageNo": "1", "numOfRows": "1", "pool": "TRI", "meet": "2", "rc_date": "20220806", "rc_no": "2", "_type": "json"},
-                  "required_fields_any": ["chulNo", "chulNo2", "chulNo3", "odds", "pool"],
-              },
-              {
-                  "name": "race_detail_result_old_api214",
-                  "url": "http://apis.data.go.kr/B551015/API214_1/RaceDetailResult_1",
-                  "params": {"pageNo": "1", "numOfRows": "1", "meet": "2", "rc_date": "20220806", "rc_no": "2", "_type": "json"},
-                  "required_fields_any": ["rank", "chulNo", "hrName", "ord"],
-              },
-              {
-                  "name": "race_detail_result_new_racedetailresult",
-                  "url": "http://apis.data.go.kr/B551015/racedetailresult/getracedetailresult",
-                  "params": {"pageNo": "1", "numOfRows": "1", "meet": "2", "rc_date": "20220806", "rc_no": "2", "_type": "json"},
-                  "required_fields_any": ["rank", "chulNo", "hrName", "ord"],
-              },
+          # These race_ids were taken from Dropbox:
+          # /kra-analysis/data/raw_collected_v3_15w/kra_2025/raw_archive/2025/2025-01/*.json.gz
+          # They are therefore a direct smoke sample of races present in our archived data.
+          samples = [
+              "2025-01-24_3_08",
+              "2025-01-26_3_04",
+              "2025-01-04_1_11",
+              "2025-01-17_2_05",
+              "2025-01-10_2_02",
           ]
+
+          ENDPOINTS = {
+              "overview": "http://apis.data.go.kr/B551015/API3_1/raceInfo_1",
+              "sales": "http://apis.data.go.kr/B551015/API179_1/salesAndDividendRate_1",
+              "tri": "http://apis.data.go.kr/B551015/API160_1/integratedInfo_1",
+              "detail": "http://apis.data.go.kr/B551015/racedetailresult/getracedetailresult",
+          }
 
           def get_nested(obj, *path):
               cur = obj
@@ -83,110 +67,74 @@ jobs:
                   return items
               return [items]
 
-          def report_error_payload(text):
-              try:
-                  obj = json.loads(text)
-                  header = obj.get("OpenAPI_ServiceResponse", {}).get("cmmMsgHeader", {})
-                  if header:
-                      print("error_payload=" + json.dumps(header, ensure_ascii=False, sort_keys=True))
-              except Exception:
-                  pass
+          def call_json(name, params):
+              params = dict(params)
+              params["serviceKey"] = key
+              params["_type"] = "json"
+              url = ENDPOINTS[name] + "?" + urllib.parse.urlencode(params, safe="%")
+              req = urllib.request.Request(url, headers={"User-Agent": "kra-v3-api-smoke/1.0"})
+              with urllib.request.urlopen(req, timeout=45) as resp:
+                  text = resp.read(400000).decode("utf-8", errors="replace")
+              data = json.loads(text)
+              header = get_nested(data, "response", "header") or {}
+              body = get_nested(data, "response", "body") or {}
+              result_code = str(header.get("resultCode"))
+              result_msg = header.get("resultMsg")
+              if result_code not in {"00", "0", "None"}:
+                  raise RuntimeError(f"{name} resultCode={result_code} resultMsg={result_msg}")
+              return body, normalize_items(get_nested(body, "items"))
 
           failures = []
-          soft_failures = []
-          for test in tests:
-              params = dict(test["params"])
-              params["serviceKey"] = key
-              query = urllib.parse.urlencode(params, safe="%")
-              url = test["url"] + "?" + query
-              print(f"\n## {test['name']}")
-              print(test["url"])
-              public_params = {k: v for k, v in params.items() if k != "serviceKey"}
-              print("params=" + json.dumps(public_params, ensure_ascii=False, sort_keys=True))
+          print("race_id,overview_count,sales_pools,detail_horses,tri_rows,expected_tri_rows,checks")
+          for race_id in samples:
+              date, meet, rc_no = race_id.split("_")
+              rc_date = date.replace("-", "")
+              base = {"pageNo": "1", "numOfRows": "200", "meet": meet, "rc_date": rc_date, "rc_no": str(int(rc_no))}
+              checks = []
               try:
-                  req = urllib.request.Request(url, headers={"User-Agent": "kra-v3-api-smoke/1.0"})
-                  with urllib.request.urlopen(req, timeout=45) as resp:
-                      status = resp.status
-                      content_type = resp.headers.get("content-type", "")
-                      raw = resp.read(200000)
-              except urllib.error.HTTPError as exc:
-                  status = exc.code
-                  content_type = exc.headers.get("content-type", "") if exc.headers else ""
-                  raw = exc.read(200000)
+                  overview_body, overview_items = call_json("overview", {**base, "numOfRows": "10"})
+                  if int(overview_body.get("totalCount", 0) or 0) != 1:
+                      raise AssertionError(f"overview totalCount={overview_body.get('totalCount')}")
+                  ov = overview_items[0]
+                  for field in ("rcDate", "rcNo", "meet"):
+                      if field not in ov:
+                          raise AssertionError(f"overview missing {field}")
+                  checks.append("overview")
+
+                  sales_body, sales_items = call_json("sales", base)
+                  pools = {str(x.get("pool")) for x in sales_items if isinstance(x, dict)}
+                  if int(sales_body.get("totalCount", 0) or 0) < 1 or not pools:
+                      raise AssertionError("sales returned no pools")
+                  # API179 should at least expose amount/odds/pool for each returned pool.
+                  if not all({"amt", "odds", "pool"}.issubset(x.keys()) for x in sales_items if isinstance(x, dict)):
+                      raise AssertionError("sales missing amt/odds/pool in at least one item")
+                  checks.append("sales")
+
+                  detail_body, detail_items = call_json("detail", base)
+                  n_horses = int(detail_body.get("totalCount", 0) or 0)
+                  if n_horses < 3:
+                      raise AssertionError(f"detail totalCount={n_horses}")
+                  detail_fields = set(detail_items[0].keys()) if detail_items and isinstance(detail_items[0], dict) else set()
+                  if not {"chulNo", "hrName", "rcDate", "rcNo"}.issubset(detail_fields):
+                      raise AssertionError(f"detail missing representative fields: {detail_fields}")
+                  checks.append("detail")
+
+                  expected_tri = n_horses * (n_horses - 1) * (n_horses - 2)
+                  tri_body, tri_items = call_json("tri", {**base, "pool": "TRI", "numOfRows": "1"})
+                  tri_rows = int(tri_body.get("totalCount", 0) or 0)
+                  if tri_rows != expected_tri:
+                      raise AssertionError(f"tri totalCount={tri_rows}, expected={expected_tri}")
+                  if tri_items and not {"chulNo", "chulNo2", "chulNo3", "odds"}.issubset(tri_items[0].keys()):
+                      raise AssertionError("tri missing combination fields")
+                  checks.append("tri_count")
+
+                  print(f"{race_id},{overview_body.get('totalCount')},{len(pools)},{n_horses},{tri_rows},{expected_tri},{'|'.join(checks)}")
               except Exception as exc:
-                  print(f"ERROR: request failed: {type(exc).__name__}: {exc}")
-                  failures.append(test["name"])
-                  continue
-
-              text = raw.decode("utf-8", errors="replace")
-              print(f"http_status={status}")
-              print(f"content_type={content_type}")
-              print(f"body_prefix={text[:240].replace(chr(10), ' ')}")
-              if status != 200:
-                  print("ERROR: non-200 response")
-                  report_error_payload(text)
-                  failures.append(test["name"])
-                  continue
-
-              handled = False
-              try:
-                  parsed = json.loads(text)
-                  header = get_nested(parsed, "response", "header") or {}
-                  body = get_nested(parsed, "response", "body") or {}
-                  items = normalize_items(get_nested(body, "items"))
-                  print("parse=json")
-                  print(f"resultCode={header.get('resultCode')}")
-                  print(f"resultMsg={header.get('resultMsg')}")
-                  print(f"totalCount={body.get('totalCount')}")
-                  print(f"item_count={len(items)}")
-                  if items and isinstance(items[0], dict):
-                      fields = sorted(items[0].keys())
-                      print("first_item_fields=" + ",".join(fields[:80]))
-                      missing = [f for f in test.get("required_fields_any", []) if f not in fields]
-                      if len(missing) == len(test.get("required_fields_any", [])):
-                          print("WARN: none of the expected representative fields were present")
-                          soft_failures.append(test["name"])
-                  if str(header.get("resultCode")) not in {"00", "0", "None"}:
-                      print("ERROR: API resultCode is not success")
-                      failures.append(test["name"])
-                  elif len(items) == 0:
-                      print("WARN: call succeeded but returned zero items")
-                      soft_failures.append(test["name"])
-                  handled = True
-              except Exception:
-                  pass
-
-              if handled:
-                  continue
-
-              try:
-                  root = ET.fromstring(text)
-                  result_code = root.findtext(".//resultCode")
-                  result_msg = root.findtext(".//resultMsg")
-                  items = root.findall(".//item")
-                  print("parse=xml")
-                  print(f"resultCode={result_code}")
-                  print(f"resultMsg={result_msg}")
-                  print(f"item_count={len(items)}")
-                  if items:
-                      fields = sorted({child.tag for child in list(items[0])})
-                      print("first_item_fields=" + ",".join(fields[:80]))
-                  if result_code not in {"00", "0", None}:
-                      print("ERROR: API resultCode is not success")
-                      failures.append(test["name"])
-                  elif len(items) == 0:
-                      print("WARN: call succeeded but returned zero items")
-                      soft_failures.append(test["name"])
-              except Exception as exc:
-                  print(f"ERROR: response is neither JSON nor XML: {exc}")
-                  failures.append(test["name"])
+                  print(f"{race_id},ERROR,,,,,{type(exc).__name__}: {exc}")
+                  failures.append(race_id)
 
           if failures:
-              print("\nFAILED_ENDPOINTS=" + ",".join(failures))
-              if soft_failures:
-                  print("WARN_ENDPOINTS=" + ",".join(soft_failures))
+              print("FAILED_RACES=" + ",".join(failures))
               sys.exit(1)
-          if soft_failures:
-              print("\nWARN_ENDPOINTS=" + ",".join(soft_failures))
-          print("\nKRA OpenAPI smoke tests completed.")
+          print("Sample Dropbox race-id consistency check completed.")
           PY
