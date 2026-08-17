@@ -41,7 +41,7 @@ jobs:
           echo "Service key is available"
 
       - name: Run collector unit tests
-        run: python3 -m unittest test_collect_openapi_payouts -v
+        run: python3 -m unittest discover -s tests -p 'test_openapi_payouts.py' -v
 
       - name: Collect realized payouts and audit missing winners
         run: |
