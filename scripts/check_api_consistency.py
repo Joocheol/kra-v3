@@ -31,6 +31,7 @@ from typing import Iterable
 API_BASE = "http://apis.data.go.kr/B551015/API3_1/raceInfo_1"
 MEET_CODES = (1, 2, 3)
 RACE_FILE_RE = re.compile(r"(?P<date>\d{4}-\d{2}-\d{2})_(?P<meet>\d+)_(?P<rc_no>\d+)\.json\.gz$")
+RACE_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_\d+_\d+$")
 
 MEET_NAME_TO_CODE = {
     "서울": 1,
@@ -56,7 +57,8 @@ class RaceId:
     @classmethod
     def parse(cls, value: str) -> "RaceId":
         try:
-            base = Path(value.strip()).name
+            text = value.strip()
+            base = Path(text).name if "/" in text else text
             base = base.replace(".json.gz", "")
             date, meet, rc_no = base.split("_")
             year, month, day = date.split("-")
@@ -138,17 +140,40 @@ def call_json(params: dict[str, str], *, timeout: float, retries: int) -> tuple[
     raise RuntimeError(f"API request failed after {retries + 1} attempts: {last_exc}")
 
 
+def load_race_id_file(path: str) -> set[RaceId]:
+    out: set[RaceId] = set()
+    with open(path, "rt", encoding="utf-8", newline="") as fh:
+        sample = fh.read(4096)
+        fh.seek(0)
+        if "race_id" in sample.splitlines()[0:1][0] if sample.splitlines() else False:
+            reader = csv.DictReader(fh)
+            if not reader.fieldnames or "race_id" not in reader.fieldnames:
+                raise ValueError(f"CSV manifest lacks race_id column: {path}")
+            for row in reader:
+                race_id = str(row.get("race_id", "")).strip()
+                if race_id:
+                    out.add(RaceId.parse(race_id))
+        else:
+            for line in fh:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    # Accept either one race_id per line or a simple first-column CSV row.
+                    first = line.split(",", 1)[0].strip()
+                    if first == "race_id":
+                        continue
+                    if first:
+                        out.add(RaceId.parse(first))
+    print(f"race_id_file={path} loaded_count={len(out)}")
+    return out
+
+
 def load_archive_race_ids(values: Iterable[str], files: Iterable[str], roots: Iterable[str]) -> set[RaceId]:
     out: set[RaceId] = set()
     for value in values:
         if value.strip():
             out.add(RaceId.parse(value))
     for path in files:
-        with open(path, "rt", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    out.add(RaceId.parse(line))
+        out.update(load_race_id_file(path))
     for root in roots:
         root_path = Path(root).expanduser()
         if not root_path.exists():
