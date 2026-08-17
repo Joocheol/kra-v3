@@ -1,0 +1,62 @@
+name: KRA OpenAPI payout audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_month:
+        description: First month (YYYYMM)
+        required: true
+        default: "201601"
+      end_month:
+        description: Last month (YYYYMM)
+        required: true
+        default: "202512"
+  push:
+    branches:
+      - agent/openapi179-historical-audit
+    paths:
+      - collect_openapi_payouts.py
+      - test_collect_openapi_payouts.py
+      - .github/workflows/openapi-payout-audit.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify secret is available
+        shell: bash
+        run: |
+          if [ "${#DATA_GO_KR_SERVICE_KEY}" -le 20 ]; then
+            echo "DATA_GO_KR_SERVICE_KEY is missing or implausibly short" >&2
+            exit 1
+          fi
+          echo "Service key is available"
+
+      - name: Run collector unit tests
+        run: python3 -m unittest test_collect_openapi_payouts -v
+
+      - name: Collect realized payouts and audit missing winners
+        run: |
+          python3 collect_openapi_payouts.py \
+            --start-month "${{ inputs.start_month || '201601' }}" \
+            --end-month "${{ inputs.end_month || '202512' }}" \
+            --out outputs/openapi179
+
+      - name: Show report in job summary
+        run: cat outputs/openapi179/openapi179_report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload audit results
+        uses: actions/upload-artifact@v4
+        with:
+          name: kra-openapi179-audit
+          path: outputs/openapi179/
+          if-no-files-found: error
+          retention-days: 30
