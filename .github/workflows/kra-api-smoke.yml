@@ -14,7 +14,7 @@ permissions:
 jobs:
   kra-api-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -32,8 +32,8 @@ jobs:
           python3 scripts/check_api_consistency.py
           --year ${{ matrix.year }}
           --meet ${{ matrix.meet }}
-          --timeout 60
-          --retries 3
+          --timeout 180
+          --retries 2
           --diff-dir findings/api_consistency_diff
           --sample-race-id 2025-01-24_3_08
           --sample-race-id 2025-01-26_3_04
@@ -63,6 +63,7 @@ jobs:
 
           The GitHub Actions smoke test splits API manifest checks by meet
           and throttles concurrency to avoid public API timeouts.
+          Long-response jobs use a 180-second request timeout.
           It writes artifacts named kra-api-race-ids-YYYY-meet-M.
           The full local comparison writes api_ids_YYYY.csv, api_only_YYYY.csv,
           and archive_only_YYYY.csv files.
