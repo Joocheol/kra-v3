@@ -384,6 +384,8 @@ def write_report(
     rows: list[dict[str, object]],
     payouts: list[dict[str, object]],
     maximum_rows: list[dict[str, object]],
+    project_maximum_rows: list[dict[str, object]],
+    project_payouts: list[dict[str, object]],
     missing: list[dict[str, object]],
     start_year: int,
     end_year: int,
@@ -391,18 +393,40 @@ def write_report(
 ) -> None:
     races = {(r["race_id"]) for r in rows}
     over_cap = sum(Decimal(str(p["actual_odds"])) > Decimal("9999.9") for p in payouts)
+    project_over_cap = sum(
+        Decimal(str(p["actual_odds"])) > Decimal("9999.9") for p in project_payouts
+    )
     lines = [
         "# KRA API179 실현배당 전수 점검",
         "",
         f"- 요청기간: `{start_year}`–`{end_year}`",
-        f"- API 호출: {request_count:,}회 (연도·경마장 조회 후 자동 페이지네이션)",
+        f"- 이번 실행의 신규 API 호출: {request_count:,}회 (체크포인트 재사용 가능)",
         f"- API179 수록 경주: {len(races):,}개",
         f"- 경주·승식 행: {len(rows):,}개",
         f"- 실현 지급배당: {len(payouts):,}개",
         f"- 9999.9 초과 실현 지급배당: {over_cap:,}개",
         f"- 무투표 후보: {len(missing):,}개",
         "",
-        "## 승식별 최대 실현 배당",
+        "## 프로젝트 표본의 승식별 최대 실현 배당",
+        "",
+        "프로젝트 원자료가 있는 2016–2019년과 2022–2025년 경주만 포함한다.",
+        f"실현 지급배당은 {len(project_payouts):,}개이며, 9999.9 초과는 {project_over_cap:,}개다.",
+        "",
+        "| 승식 | 배당률 | 경주 | 조합 | 매출액 | 추론 마권수 |",
+        "|---|---:|---|---:|---:|---:|",
+    ]
+    for row in project_maximum_rows:
+        exact = row["ticket_count_exact"] or "다중지급/구간"
+        lines.append(
+            f"| {row['pool']} | {row['actual_odds']} | {row['race_id']} | "
+            f"{row['combination']} | {int(row['turnover_won']):,}원 | {exact} |"
+        )
+    lines += [
+        "",
+        "## API 전기간의 승식별 최대 실현 배당",
+        "",
+        "2020–2021년을 포함한 API179 전체 범위다. 코로나 시기의 소액 풀 최고값은 "
+        "프로젝트 표본 결과와 구분한다.",
         "",
         "| 승식 | 배당률 | 경주 | 조합 | 매출액 | 추론 마권수 |",
         "|---|---:|---|---:|---:|---:|",
@@ -504,13 +528,20 @@ def main() -> int:
     maximum_rows = maxima(payouts)
     races = load_races(args.races)
     missing = find_missing_candidates(races, rows, payouts)
+    project_race_ids = {race["race_id"] for race in races}
+    project_payouts = [row for row in payouts if row["race_id"] in project_race_ids]
+    project_maximum_rows = maxima(project_payouts)
 
     write_csv(args.out / "openapi179_rows.csv.gz", rows, ROW_FIELDS)
     write_csv(args.out / "openapi179_payouts.csv.gz", payouts, PAYOUT_FIELDS)
     write_csv(args.out / "openapi179_maxima.csv", maximum_rows, PAYOUT_FIELDS)
+    write_csv(
+        args.out / "openapi179_project_maxima.csv", project_maximum_rows, PAYOUT_FIELDS
+    )
     write_csv(args.out / "openapi179_missing_candidates.csv", missing, MISSING_FIELDS)
     write_report(
-        args.out / "openapi179_report.md", rows, payouts, maximum_rows, missing,
+        args.out / "openapi179_report.md", rows, payouts, maximum_rows,
+        project_maximum_rows, project_payouts, missing,
         args.start_year, args.end_year, request_count,
     )
     print(f"wrote {args.out} ({len(rows):,} pool rows, {len(payouts):,} payouts)")
