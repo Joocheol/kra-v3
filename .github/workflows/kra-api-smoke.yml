@@ -30,11 +30,19 @@ jobs:
           --year ${{ matrix.year }}
           --timeout 30
           --retries 1
+          --diff-dir findings/api_consistency_diff
           --sample-race-id 2025-01-24_3_08
           --sample-race-id 2025-01-26_3_04
           --sample-race-id 2025-01-04_1_11
           --sample-race-id 2025-01-17_2_05
           --sample-race-id 2025-01-10_2_02
+
+      - name: Upload API race-id manifest for ${{ matrix.year }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kra-api-race-ids-${{ matrix.year }}
+          path: findings/api_consistency_diff/api_ids_${{ matrix.year }}.csv
+          if-no-files-found: error
 
       - name: Show full local bidirectional diff command
         run: |
@@ -49,5 +57,5 @@ jobs:
             --diff-dir findings/api_consistency_diff \
             --fail-on-diff
 
-          This writes api_only_YYYY.csv and archive_only_YYYY.csv files.
+          This writes api_ids_YYYY.csv, api_only_YYYY.csv, and archive_only_YYYY.csv files.
           EOF
