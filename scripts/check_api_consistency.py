@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Check KRA OpenAPI consistency against archived race identifiers.
 
-This script is intentionally conservative with API calls.  The first pass reads
-one year of the race overview API in as few paginated requests as possible and
-checks whether race IDs known from the archive are present in the official API.
+This script is intentionally conservative with API calls.  It reads the race
+overview API one year at a time and checks whether race IDs known from the
+archive are present in the official API.
 
 Typical use:
 
@@ -30,6 +30,20 @@ from typing import Iterable
 
 API_BASE = "http://apis.data.go.kr/B551015/API3_1/raceInfo_1"
 
+MEET_NAME_TO_CODE = {
+    "서울": 1,
+    "서울경마": 1,
+    "SEOUL": 1,
+    "제주": 2,
+    "제주경마": 2,
+    "JEJU": 2,
+    "부산경남": 3,
+    "부경": 3,
+    "부산": 3,
+    "부산경남경마": 3,
+    "BUSAN": 3,
+}
+
 
 @dataclass(frozen=True, order=True)
 class RaceId:
@@ -54,6 +68,17 @@ class RaceId:
 
     def __str__(self) -> str:
         return f"{self.date}_{self.meet}_{self.rc_no:02d}"
+
+
+def parse_meet(value: object) -> int:
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    if text.isdigit():
+        return int(text)
+    if text in MEET_NAME_TO_CODE:
+        return MEET_NAME_TO_CODE[text]
+    raise ValueError(f"unknown meet value: {value!r}")
 
 
 def normalize_items(items):
@@ -122,11 +147,10 @@ def load_archive_race_ids(values: Iterable[str], files: Iterable[str]) -> set[Ra
 def api_item_to_race_id(item: dict) -> RaceId:
     rc_date = str(item["rcDate"])
     date = f"{rc_date[:4]}-{rc_date[4:6]}-{rc_date[6:8]}"
-    return RaceId(date=date, meet=int(item["meet"]), rc_no=int(item["rcNo"]))
+    return RaceId(date=date, meet=parse_meet(item["meet"]), rc_no=int(item["rcNo"]))
 
 
 def fetch_year_overview(year: int, *, page_size: int, timeout: float, retries: int) -> list[dict]:
-    # Prefer a true year-level call.  If the provider pages internally, follow pageNo.
     page_no = 1
     all_items: list[dict] = []
     total_count: int | None = None
@@ -144,7 +168,7 @@ def fetch_year_overview(year: int, *, page_size: int, timeout: float, retries: i
             total_count = int(body.get("totalCount", 0) or 0)
             print(f"api_year={year} totalCount={total_count} page_size={page_size}")
         all_items.extend(x for x in items if isinstance(x, dict))
-        print(f"fetched_page={page_no} page_items={len(items)} cumulative={len(all_items)}")
+        print(f"year={year} fetched_page={page_no} page_items={len(items)} cumulative={len(all_items)}")
         if len(all_items) >= total_count:
             break
         if not items:
@@ -153,21 +177,12 @@ def fetch_year_overview(year: int, *, page_size: int, timeout: float, retries: i
     return all_items
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--year", type=int, required=True)
-    parser.add_argument("--sample-race-id", action="append", default=[])
-    parser.add_argument("--race-id-file", action="append", default=[])
-    parser.add_argument("--page-size", type=int, default=10000)
-    parser.add_argument("--timeout", type=float, default=60.0)
-    parser.add_argument("--retries", type=int, default=2)
-    args = parser.parse_args()
-
-    archive_ids = load_archive_race_ids(args.sample_race_id, args.race_id_file)
-    archive_ids = {rid for rid in archive_ids if int(rid.date[:4]) == args.year}
+def check_year(year: int, archive_ids_all: set[RaceId], *, page_size: int, timeout: float, retries: int) -> int:
+    archive_ids = {rid for rid in archive_ids_all if int(rid.date[:4]) == year}
+    print(f"\n=== year {year} ===")
     print(f"archive_sample_count={len(archive_ids)}")
 
-    api_items = fetch_year_overview(args.year, page_size=args.page_size, timeout=args.timeout, retries=args.retries)
+    api_items = fetch_year_overview(year, page_size=page_size, timeout=timeout, retries=retries)
     api_ids = {api_item_to_race_id(item) for item in api_items}
     print(f"api_unique_race_count={len(api_ids)}")
 
@@ -187,7 +202,36 @@ def main() -> int:
             print(f"MISSING {rid}")
         return 1
 
-    print("Year-level API overview consistency check completed.")
+    print(f"year={year} status=ok")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--year", type=int, action="append", required=True)
+    parser.add_argument("--sample-race-id", action="append", default=[])
+    parser.add_argument("--race-id-file", action="append", default=[])
+    parser.add_argument("--page-size", type=int, default=10000)
+    parser.add_argument("--timeout", type=float, default=60.0)
+    parser.add_argument("--retries", type=int, default=2)
+    args = parser.parse_args()
+
+    archive_ids = load_archive_race_ids(args.sample_race_id, args.race_id_file)
+    failures = 0
+    for year in sorted(set(args.year)):
+        failures += check_year(
+            year,
+            archive_ids,
+            page_size=args.page_size,
+            timeout=args.timeout,
+            retries=args.retries,
+        )
+
+    if failures:
+        print(f"overall_status=failed failed_years={failures}")
+        return 1
+
+    print("overall_status=ok")
     return 0
 
 
