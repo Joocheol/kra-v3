@@ -17,23 +17,67 @@ where `meet` is the numeric meet code used in the archive file names.
 ## Current status
 
 - GitHub Actions uses the repository secret `DATA_GO_KR_SERVICE_KEY` to build API race-id manifests.
-- API manifests are uploaded as artifacts named `kra-api-race-ids-YYYY`.
-- Retry/timeout settings were increased on the PR branch after the first artifact run:
-  - workflow timeout: 6 minutes -> 12 minutes
-  - API request timeout: 30 seconds -> 60 seconds
-  - API retries: 1 -> 3
-- In the latest retry run observed on 2026-08-18 KST, API manifests had already succeeded for:
-  - 2017
-  - 2018
-  - 2022
-  - 2023
-  - 2024
-- In the same retry run, the 2016, 2019, and 2025 jobs were still running at the time of this note update.
-- Dropbox archive listing is available through the ChatGPT Dropbox connector, but full set comparison must distinguish `api_only` from `archive_only`; monthly total counts alone are not sufficient because the two sides can offset within a month.
+- API manifests are uploaded as artifacts named `kra-api-race-ids-YYYY-meet-M` after splitting the smoke test by year and meet.
+- API request settings on the PR branch currently use:
+  - API request timeout: 60 seconds
+  - API retries: 3
+  - workflow timeout: 8 minutes per matrix job
+  - matrix split: 8 years x 3 meet codes
+  - matrix throttling: `max-parallel: 2` to reduce public API timeout risk.
+- In run `32077482540`, 2025 succeeded for all three meet codes, so the 2025 API manifest is complete.
+- The same run produced a mixture of successes and failures for earlier years. Checked failure logs show the same transient cause:
+
+```text
+RuntimeError: API request failed after 4 attempts: <urlopen error timed out>
+```
+
+Therefore these failed jobs should be interpreted as public API timeout failures, not as data mismatches.
+
+## Successful API manifest artifacts observed in run 32077482540
+
+The following API manifest artifacts were created successfully:
+
+```text
+2016 meet 1
+2016 meet 3
+2017 meet 1
+2017 meet 2
+2018 meet 2
+2018 meet 3
+2019 meet 2
+2019 meet 3
+2022 meet 1
+2023 meet 2
+2024 meet 2
+2025 meet 1
+2025 meet 2
+2025 meet 3
+```
+
+## Failed API manifest jobs observed in run 32077482540
+
+The following jobs failed due to API timeouts and should be retried under throttled or serial execution:
+
+```text
+2016 meet 2
+2017 meet 3
+2018 meet 1
+2019 meet 1
+2022 meet 2
+2022 meet 3
+2023 meet 1
+2023 meet 3
+2024 meet 1
+2024 meet 3
+```
 
 ## 2025 directly confirmed `api_only` records
 
-The following 2025 races were directly checked against Dropbox metadata and confirmed to exist in the API manifest but not in the Dropbox raw archive.
+The 2025 API manifest is complete: meet 1, meet 2, and meet 3 artifacts jointly contain 2,481 API race IDs. The following records were directly checked against Dropbox metadata and confirmed to exist in the API manifest but not in the Dropbox raw archive. They are also recorded in machine-readable form at:
+
+```text
+findings/api_only_2025_confirmed.csv
+```
 
 ```csv
 race_id,date,weekday,meet,rc_no,note
@@ -88,9 +132,9 @@ race_id,date,weekday,meet,rc_no,note
 2025-12-13_2_06,2025-12-13,Saturday,2,6,individual confirmed missing
 ```
 
-Confirmed count so far: 49 API-only races.
+Confirmed 2025 API-only count so far: 49 races.
 
-## Observed pattern
+## Observed 2025 pattern
 
 The confirmed missing dates are mostly Saturdays, plus a 2025-10-02 to 2025-10-04 holiday/weekend-adjacent block:
 
@@ -115,4 +159,4 @@ Do not infer exact `api_only` or `archive_only` counts from monthly totals alone
    - `api_only_YYYY.csv`: races in KRA OpenAPI but absent from Dropbox raw archive.
    - `archive_only_YYYY.csv`: races in Dropbox raw archive but absent from KRA OpenAPI.
 3. Do not rely on monthly totals alone, because `api_only` and `archive_only` can offset within the same month.
-4. Finish the retry run and verify whether 2016, 2019, and 2025 API manifests are uploaded successfully.
+4. Retry failed API manifest jobs with throttled matrix execution or manually rerun failed jobs after reducing public API concurrency.
