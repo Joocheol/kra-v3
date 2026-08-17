@@ -22,7 +22,6 @@ jobs:
           import json
           import os
           import sys
-          import urllib.error
           import urllib.parse
           import urllib.request
 
@@ -33,7 +32,6 @@ jobs:
 
           # These race_ids were taken from Dropbox:
           # /kra-analysis/data/raw_collected_v3_15w/kra_2025/raw_archive/2025/2025-01/*.json.gz
-          # They are therefore a direct smoke sample of races present in our archived data.
           samples = [
               "2025-01-24_3_08",
               "2025-01-26_3_04",
@@ -84,8 +82,20 @@ jobs:
                   raise RuntimeError(f"{name} resultCode={result_code} resultMsg={result_msg}")
               return body, normalize_items(get_nested(body, "items"))
 
+          def active_count_from_detail(items):
+              # The new racedetailresult API can include scratched/excluded horses.
+              # chulYn=0 appears for actual starters in sampled successful records.
+              # If chulYn is unavailable, fall back to rows with a positive finish/start order.
+              with_chulyn = [x for x in items if isinstance(x, dict) and "chulYn" in x]
+              if with_chulyn:
+                  return sum(str(x.get("chulYn")) == "0" for x in with_chulyn)
+              with_stord = [x for x in items if isinstance(x, dict) and "stOrd" in x]
+              if with_stord:
+                  return sum(str(x.get("stOrd")) not in {"", "0", "None", "null"} for x in with_stord)
+              return len(items)
+
           failures = []
-          print("race_id,overview_count,sales_pools,detail_horses,tri_rows,expected_tri_rows,checks")
+          print("race_id,overview_count,sales_pools,detail_rows,active_horses,tri_rows,expected_tri_rows,checks")
           for race_id in samples:
               date, meet, rc_no = race_id.split("_")
               rc_date = date.replace("-", "")
@@ -105,21 +115,23 @@ jobs:
                   pools = {str(x.get("pool")) for x in sales_items if isinstance(x, dict)}
                   if int(sales_body.get("totalCount", 0) or 0) < 1 or not pools:
                       raise AssertionError("sales returned no pools")
-                  # API179 should at least expose amount/odds/pool for each returned pool.
                   if not all({"amt", "odds", "pool"}.issubset(x.keys()) for x in sales_items if isinstance(x, dict)):
                       raise AssertionError("sales missing amt/odds/pool in at least one item")
                   checks.append("sales")
 
                   detail_body, detail_items = call_json("detail", base)
-                  n_horses = int(detail_body.get("totalCount", 0) or 0)
-                  if n_horses < 3:
-                      raise AssertionError(f"detail totalCount={n_horses}")
+                  detail_rows = int(detail_body.get("totalCount", 0) or 0)
+                  if detail_rows < 3:
+                      raise AssertionError(f"detail totalCount={detail_rows}")
                   detail_fields = set(detail_items[0].keys()) if detail_items and isinstance(detail_items[0], dict) else set()
                   if not {"chulNo", "hrName", "rcDate", "rcNo"}.issubset(detail_fields):
                       raise AssertionError(f"detail missing representative fields: {detail_fields}")
+                  active_horses = active_count_from_detail(detail_items)
+                  if active_horses < 3:
+                      raise AssertionError(f"active_horses={active_horses}")
                   checks.append("detail")
 
-                  expected_tri = n_horses * (n_horses - 1) * (n_horses - 2)
+                  expected_tri = active_horses * (active_horses - 1) * (active_horses - 2)
                   tri_body, tri_items = call_json("tri", {**base, "pool": "TRI", "numOfRows": "1"})
                   tri_rows = int(tri_body.get("totalCount", 0) or 0)
                   if tri_rows != expected_tri:
@@ -128,9 +140,9 @@ jobs:
                       raise AssertionError("tri missing combination fields")
                   checks.append("tri_count")
 
-                  print(f"{race_id},{overview_body.get('totalCount')},{len(pools)},{n_horses},{tri_rows},{expected_tri},{'|'.join(checks)}")
+                  print(f"{race_id},{overview_body.get('totalCount')},{len(pools)},{detail_rows},{active_horses},{tri_rows},{expected_tri},{'|'.join(checks)}")
               except Exception as exc:
-                  print(f"{race_id},ERROR,,,,,{type(exc).__name__}: {exc}")
+                  print(f"{race_id},ERROR,,,,,,{type(exc).__name__}: {exc}")
                   failures.append(race_id)
 
           if failures:
