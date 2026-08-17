@@ -35,3 +35,19 @@ jobs:
           --sample-race-id 2025-01-04_1_11
           --sample-race-id 2025-01-17_2_05
           --sample-race-id 2025-01-10_2_02
+
+      - name: Show full local bidirectional diff command
+        run: |
+          cat <<'EOF'
+          To run the full bidirectional archive/API comparison on a machine
+          where Dropbox is synced, use:
+
+          python3 scripts/check_api_consistency.py \
+            --year 2016 --year 2017 --year 2018 --year 2019 \
+            --year 2022 --year 2023 --year 2024 --year 2025 \
+            --archive-root "$HOME/Dropbox/kra-analysis/data/raw_collected_v3_15w" \
+            --diff-dir findings/api_consistency_diff \
+            --fail-on-diff
+
+          This writes api_only_YYYY.csv and archive_only_YYYY.csv files.
+          EOF
