@@ -36,17 +36,22 @@ jobs:
               {
                   "name": "sales_and_dividend_rate",
                   "url": "http://apis.data.go.kr/B551015/API179_1/salesAndDividendRate_1",
-                  "params": {"pageNo": "1", "numOfRows": "1", "_type": "json"},
+                  # Documented sample parameters: meet=1, rc_date=20190504.
+                  # Supplying no date asks the provider to search roughly a month,
+                  # which can time out before pagination is applied.
+                  "params": {"pageNo": "1", "numOfRows": "1", "meet": "1", "rc_date": "20190504", "rc_no": "1", "_type": "json"},
               },
               {
                   "name": "integrated_dividend_rate",
                   "url": "http://apis.data.go.kr/B551015/API160_1/integratedInfo_1",
-                  "params": {"pageNo": "1", "numOfRows": "1", "_type": "json"},
+                  # Documented sample parameters: pool=TRI, meet=2, rc_date=20220806, rc_no=2.
+                  "params": {"pageNo": "1", "numOfRows": "1", "pool": "TRI", "meet": "2", "rc_date": "20220806", "rc_no": "2", "_type": "json"},
               },
               {
                   "name": "race_detail_result",
                   "url": "http://apis.data.go.kr/B551015/API214_1/RaceDetailResult_1",
-                  "params": {"pageNo": "1", "numOfRows": "1", "_type": "json"},
+                  # Same small race slice as the dividend sample.
+                  "params": {"pageNo": "1", "numOfRows": "1", "meet": "2", "rc_date": "20220806", "rc_no": "2", "_type": "json"},
               },
           ]
 
@@ -76,9 +81,11 @@ jobs:
               url = test["url"] + "?" + query
               print(f"\n## {test['name']}")
               print(test["url"])
+              public_params = {k: v for k, v in params.items() if k != "serviceKey"}
+              print("params=" + json.dumps(public_params, ensure_ascii=False, sort_keys=True))
               try:
                   req = urllib.request.Request(url, headers={"User-Agent": "kra-v3-api-smoke/1.0"})
-                  with urllib.request.urlopen(req, timeout=20) as resp:
+                  with urllib.request.urlopen(req, timeout=45) as resp:
                       status = resp.status
                       content_type = resp.headers.get("content-type", "")
                       raw = resp.read(200000)
