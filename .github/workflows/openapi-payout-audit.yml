@@ -21,6 +21,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   audit:
@@ -42,6 +43,25 @@ jobs:
 
       - name: Run collector unit tests
         run: python3 -m unittest discover -s tests -p 'test_openapi_payouts.py' -v
+
+      - name: Restore latest OpenAPI checkpoints
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          artifact_id="$(
+            gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts?name=kra-openapi179-audit&per_page=100" \
+              --jq '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | last | .id // empty'
+          )"
+          if [ -n "$artifact_id" ]; then
+            gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+              > "$RUNNER_TEMP/openapi179-checkpoints.zip"
+            mkdir -p outputs/openapi179
+            unzip -q -o "$RUNNER_TEMP/openapi179-checkpoints.zip" -d outputs/openapi179
+            echo "Restored checkpoint artifact $artifact_id"
+          else
+            echo "No prior checkpoint artifact found"
+          fi
 
       - name: Collect realized payouts and audit missing winners
         shell: bash

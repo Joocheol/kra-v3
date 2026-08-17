@@ -37,6 +37,10 @@ class ParseOddsTests(unittest.TestCase):
             [((15, 16, 4), Decimal("12345.6"))],
         )
 
+    def test_ignores_api_placeholder(self) -> None:
+        self.assertEqual(parse_odds("ⓩ-.8", "단승식"), [])
+        self.assertEqual(parse_odds("ⓩⓩ-0", "복승식"), [])
+
     def test_year_range(self) -> None:
         self.assertEqual(year_range(2022, 2025), [2022, 2023, 2024, 2025])
 

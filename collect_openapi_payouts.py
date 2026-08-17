@@ -76,6 +76,7 @@ _PAYOUT_RE = re.compile(
     rf"(?P<combo>(?:{_HORSE_TOKEN}\s*)+)\s*-\s*"
     r"(?P<odds>[0-9][0-9,]*(?:\.[0-9]+)?)"
 )
+_PLACEHOLDER_RE = re.compile(r"^(?:ⓩ\s*){1,3}-[0-9]*(?:\.[0-9]+)?$")
 
 ROW_FIELDS = [
     "race_id", "rc_date", "meet", "meet_name", "rc_no", "pool",
@@ -103,6 +104,11 @@ def horse_number(token: str) -> int:
 def parse_odds(raw: object, pool: str) -> list[tuple[tuple[int, ...], Decimal]]:
     """Parse API179 text such as ``⑮③④-391736.8``."""
     text = "" if raw is None else str(raw).strip()
+    # API179 uses ⓩ as a non-horse placeholder in a small set of abnormal
+    # 2020--2021 rows (including zero-turnover and sub-1 refund-like values).
+    # It is not a paid winning combination.
+    if _PLACEHOLDER_RE.fullmatch(text):
+        return []
     out: list[tuple[tuple[int, ...], Decimal]] = []
     for match in _PAYOUT_RE.finditer(text):
         combo = tuple(horse_number(token) for token in _HORSE_TOKEN_RE.findall(match["combo"]))
