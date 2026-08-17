@@ -1,0 +1,153 @@
+name: KRA OpenAPI smoke test
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/kra-api-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kra-api-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+    steps:
+      - name: Check three KRA OpenAPI endpoints
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+          import xml.etree.ElementTree as ET
+
+          key = os.environ.get("DATA_GO_KR_SERVICE_KEY", "")
+          if not key:
+              print("ERROR: DATA_GO_KR_SERVICE_KEY secret is missing or empty")
+              sys.exit(1)
+
+          tests = [
+              {
+                  "name": "sales_and_dividend_rate",
+                  "url": "https://apis.data.go.kr/B551015/API179_1/salesAndDividendRate_1",
+                  "params": {"pageNo": "1", "numOfRows": "1", "_type": "json"},
+                  "expected_hint": ["sales", "dividend", "amt", "pool", "rc"],
+              },
+              {
+                  "name": "integrated_dividend_rate",
+                  "url": "https://apis.data.go.kr/B551015/API160_1/integratedInfo_1",
+                  "params": {"pageNo": "1", "numOfRows": "1", "_type": "json"},
+                  "expected_hint": ["odds", "pool", "rc"],
+              },
+              {
+                  "name": "race_detail_result",
+                  "url": "https://apis.data.go.kr/B551015/API214_1/RaceDetailResult_1",
+                  "params": {"pageNo": "1", "numOfRows": "1", "_type": "json"},
+                  "expected_hint": ["rank", "horse", "rc"],
+              },
+          ]
+
+          def get_nested(obj, *path):
+              cur = obj
+              for key in path:
+                  if isinstance(cur, dict):
+                      cur = cur.get(key)
+                  else:
+                      return None
+              return cur
+
+          def normalize_items(items):
+              if items in (None, ""):
+                  return []
+              if isinstance(items, dict) and "item" in items:
+                  items = items["item"]
+              if isinstance(items, list):
+                  return items
+              return [items]
+
+          failures = []
+          for test in tests:
+              params = dict(test["params"])
+              params["serviceKey"] = key
+              query = urllib.parse.urlencode(params, safe="%")
+              url = test["url"] + "?" + query
+              print(f"\n## {test['name']}")
+              print(test["url"])
+              try:
+                  req = urllib.request.Request(url, headers={"User-Agent": "kra-v3-api-smoke/1.0"})
+                  with urllib.request.urlopen(req, timeout=20) as resp:
+                      status = resp.status
+                      content_type = resp.headers.get("content-type", "")
+                      raw = resp.read(200000)
+              except urllib.error.HTTPError as exc:
+                  status = exc.code
+                  content_type = exc.headers.get("content-type", "") if exc.headers else ""
+                  raw = exc.read(200000)
+              except Exception as exc:
+                  print(f"ERROR: request failed: {type(exc).__name__}: {exc}")
+                  failures.append(test["name"])
+                  continue
+
+              text = raw.decode("utf-8", errors="replace")
+              print(f"http_status={status}")
+              print(f"content_type={content_type}")
+              print(f"body_prefix={text[:240].replace(chr(10), ' ')}")
+              if status != 200:
+                  print("ERROR: non-200 response")
+                  failures.append(test["name"])
+                  continue
+
+              parsed = None
+              parse_kind = None
+              try:
+                  parsed = json.loads(text)
+                  parse_kind = "json"
+              except Exception:
+                  try:
+                      parsed = ET.fromstring(text)
+                      parse_kind = "xml"
+                  except Exception as exc:
+                      print(f"ERROR: response is neither JSON nor XML: {exc}")
+                      failures.append(test["name"])
+                      continue
+
+              print(f"parse={parse_kind}")
+              if parse_kind == "json":
+                  header = get_nested(parsed, "response", "header") or {}
+                  body = get_nested(parsed, "response", "body") or {}
+                  items = normalize_items(get_nested(body, "items"))
+                  print(f"resultCode={header.get('resultCode')}")
+                  print(f"resultMsg={header.get('resultMsg')}")
+                  print(f"totalCount={body.get('totalCount')}")
+                  print(f"item_count={len(items)}")
+                  if items and isinstance(items[0], dict):
+                      print("first_item_fields=" + ",".join(sorted(items[0].keys())[:30]))
+                  if str(header.get("resultCode")) not in {"00", "0", "None"}:
+                      print("ERROR: API resultCode is not success")
+                      failures.append(test["name"])
+                  elif len(items) == 0:
+                      print("WARN: call succeeded but returned zero items")
+              else:
+                  result_code = parsed.findtext(".//resultCode")
+                  result_msg = parsed.findtext(".//resultMsg")
+                  items = parsed.findall(".//item")
+                  print(f"resultCode={result_code}")
+                  print(f"resultMsg={result_msg}")
+                  print(f"item_count={len(items)}")
+                  if result_code not in {"00", "0", None}:
+                      print("ERROR: API resultCode is not success")
+                      failures.append(test["name"])
+                  elif len(items) == 0:
+                      print("WARN: call succeeded but returned zero items")
+
+          if failures:
+              print("\nFAILED_ENDPOINTS=" + ",".join(failures))
+              sys.exit(1)
+          print("\nAll KRA OpenAPI smoke tests returned HTTP 200 and parseable success responses.")
+          PY
