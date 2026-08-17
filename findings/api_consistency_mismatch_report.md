@@ -18,8 +18,17 @@ where `meet` is the numeric meet code used in the archive file names.
 
 - GitHub Actions uses the repository secret `DATA_GO_KR_SERVICE_KEY` to build API race-id manifests.
 - API manifests are uploaded as artifacts named `kra-api-race-ids-YYYY`.
-- In the 2026-08-18 run, manifests succeeded for 2017, 2019, 2022, 2023, 2024, and 2025.
-- In the same run, 2016 and 2018 failed at the API query step and should be retried with larger timeout/retry limits.
+- Retry/timeout settings were increased on the PR branch after the first artifact run:
+  - workflow timeout: 6 minutes -> 12 minutes
+  - API request timeout: 30 seconds -> 60 seconds
+  - API retries: 1 -> 3
+- In the latest retry run observed on 2026-08-18 KST, API manifests had already succeeded for:
+  - 2017
+  - 2018
+  - 2022
+  - 2023
+  - 2024
+- In the same retry run, the 2016, 2019, and 2025 jobs were still running at the time of this note update.
 - Dropbox archive listing is available through the ChatGPT Dropbox connector, but full set comparison must distinguish `api_only` from `archive_only`; monthly total counts alone are not sufficient because the two sides can offset within a month.
 
 ## 2025 directly confirmed `api_only` records
@@ -95,6 +104,10 @@ The confirmed missing dates are mostly Saturdays, plus a 2025-10-02 to 2025-10-0
 
 This pattern suggests block-level collection gaps rather than random individual parse failures, but this remains a diagnostic interpretation until the full bidirectional diff is completed.
 
+## Important caution
+
+Do not infer exact `api_only` or `archive_only` counts from monthly totals alone. In 2025, the Dropbox monthly file count can look close to the API monthly count even when the month contains confirmed API-only records, because API-only and archive-only records may offset within the same month.
+
 ## Next required checks
 
 1. Complete exact set comparison for all target years: 2016, 2017, 2018, 2019, 2022, 2023, 2024, and 2025.
@@ -102,4 +115,4 @@ This pattern suggests block-level collection gaps rather than random individual 
    - `api_only_YYYY.csv`: races in KRA OpenAPI but absent from Dropbox raw archive.
    - `archive_only_YYYY.csv`: races in Dropbox raw archive but absent from KRA OpenAPI.
 3. Do not rely on monthly totals alone, because `api_only` and `archive_only` can offset within the same month.
-4. Retry 2016 and 2018 API manifest generation with larger timeout/retry settings.
+4. Finish the retry run and verify whether 2016, 2019, and 2025 API manifests are uploaded successfully.
