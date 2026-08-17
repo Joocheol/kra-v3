@@ -6,7 +6,7 @@ from decimal import Decimal
 from collect_openapi_payouts import (
     expected_combinations,
     find_missing_candidates,
-    month_range,
+    year_range,
     normalize_rows,
     parse_odds,
 )
@@ -25,8 +25,8 @@ class ParseOddsTests(unittest.TestCase):
             [((15, 3, 4), Decimal("391736.8"))],
         )
 
-    def test_month_range(self) -> None:
-        self.assertEqual(month_range("202311", "202402"), ["202311", "202312", "202401", "202402"])
+    def test_year_range(self) -> None:
+        self.assertEqual(year_range(2022, 2025), [2022, 2023, 2024, 2025])
 
 
 class AuditTests(unittest.TestCase):

@@ -10,7 +10,7 @@ with the archived finish order to identify *candidates* for zero winning bets.
 Example:
 
     DATA_GO_KR_SERVICE_KEY=... python3 collect_openapi_payouts.py \
-        --start-month 201601 --end-month 202512 --out outputs/openapi179
+        --start-year 2016 --end-year 2025 --out outputs/openapi179
 
 Only the standard library is required.  The service key is never written or
 printed.  Output gzip files are deterministic (mtime=0).
@@ -119,21 +119,10 @@ def canonical(pool: str, combo: tuple[int, ...]) -> tuple[int, ...]:
     return tuple(sorted(combo)) if pool in UNORDERED_POOLS else combo
 
 
-def month_range(start: str, end: str) -> list[str]:
-    if not re.fullmatch(r"\d{6}", start) or not re.fullmatch(r"\d{6}", end):
-        raise ValueError("months must be YYYYMM")
-    sy, sm = int(start[:4]), int(start[4:])
-    ey, em = int(end[:4]), int(end[4:])
-    if not (1 <= sm <= 12 and 1 <= em <= 12) or (sy, sm) > (ey, em):
-        raise ValueError(f"invalid month range: {start}..{end}")
-    out = []
-    year, month = sy, sm
-    while (year, month) <= (ey, em):
-        out.append(f"{year:04d}{month:02d}")
-        month += 1
-        if month == 13:
-            year, month = year + 1, 1
-    return out
+def year_range(start: int, end: int) -> list[int]:
+    if not (2000 <= start <= end <= 2100):
+        raise ValueError(f"invalid year range: {start}..{end}")
+    return list(range(start, end + 1))
 
 
 def _request_json(params: dict[str, object], *, retries: int = 4) -> dict:
@@ -170,7 +159,9 @@ def _items(payload: dict) -> tuple[list[dict], int]:
     return items, int(body.get("totalCount") or len(items))
 
 
-def fetch_month(service_key: str, month: str, meet: int, rows_per_page: int = 1000) -> list[dict]:
+def fetch_year(
+    service_key: str, year: int, meet: int, rows_per_page: int = 1000
+) -> tuple[list[dict], int]:
     page, out = 1, []
     while True:
         payload = _request_json({
@@ -178,13 +169,13 @@ def fetch_month(service_key: str, month: str, meet: int, rows_per_page: int = 10
             "pageNo": page,
             "numOfRows": rows_per_page,
             "meet": meet,
-            "rc_month": month,
+            "rc_year": year,
             "_type": "json",
         })
         items, total = _items(payload)
         out.extend(items)
         if len(out) >= total or not items:
-            return out
+            return out, page
         page += 1
 
 
@@ -370,15 +361,17 @@ def write_report(
     payouts: list[dict[str, object]],
     maximum_rows: list[dict[str, object]],
     missing: list[dict[str, object]],
-    start_month: str,
-    end_month: str,
+    start_year: int,
+    end_year: int,
+    request_count: int,
 ) -> None:
     races = {(r["race_id"]) for r in rows}
     over_cap = sum(Decimal(str(p["actual_odds"])) > Decimal("9999.9") for p in payouts)
     lines = [
         "# KRA API179 실현배당 전수 점검",
         "",
-        f"- 요청기간: `{start_month}`–`{end_month}`",
+        f"- 요청기간: `{start_year}`–`{end_year}`",
+        f"- API 호출: {request_count:,}회 (연도·경마장 조회 후 자동 페이지네이션)",
         f"- API179 수록 경주: {len(races):,}개",
         f"- 경주·승식 행: {len(rows):,}개",
         f"- 실현 지급배당: {len(payouts):,}개",
@@ -433,8 +426,8 @@ def write_report(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--start-month", default="201601")
-    parser.add_argument("--end-month", default="202512")
+    parser.add_argument("--start-year", type=int, default=2016)
+    parser.add_argument("--end-year", type=int, default=2025)
     parser.add_argument("--meets", default="1,2,3", help="comma-separated meet codes")
     parser.add_argument("--out", type=pathlib.Path, default=pathlib.Path("outputs/openapi179"))
     parser.add_argument("--races", type=pathlib.Path, default=pathlib.Path("데이터/races.jsonl.gz"))
@@ -444,21 +437,24 @@ def main() -> int:
     key = urllib.parse.unquote(os.environ.get("DATA_GO_KR_SERVICE_KEY", "").strip())
     if len(key) <= 20:
         parser.error("DATA_GO_KR_SERVICE_KEY is missing or implausibly short")
-    months = month_range(args.start_month, args.end_month)
+    years = year_range(args.start_year, args.end_year)
     meets = [int(value) for value in args.meets.split(",")]
     if not meets or set(meets) - set(MEET_NAMES):
         parser.error("--meets must contain only 1,2,3")
 
     raw_rows = []
-    total_calls = len(months) * len(meets)
+    total_groups = len(years) * len(meets)
+    request_count = 0
     done = 0
-    for month in months:
+    for year in years:
         for meet in meets:
-            batch = fetch_month(key, month, meet)
+            batch, pages = fetch_year(key, year, meet)
             raw_rows.extend(batch)
+            request_count += pages
             done += 1
             print(
-                f"[{done:>3}/{total_calls}] {month} {MEET_NAMES[meet]}: {len(batch):>4} rows",
+                f"[{done:>2}/{total_groups}] {year} {MEET_NAMES[meet]}: "
+                f"{len(batch):>5} rows, {pages} request(s)",
                 file=sys.stderr,
             )
             if args.pause:
@@ -476,7 +472,7 @@ def main() -> int:
     write_csv(args.out / "openapi179_missing_candidates.csv", missing, MISSING_FIELDS)
     write_report(
         args.out / "openapi179_report.md", rows, payouts, maximum_rows, missing,
-        args.start_month, args.end_month,
+        args.start_year, args.end_year, request_count,
     )
     print(f"wrote {args.out} ({len(rows):,} pool rows, {len(payouts):,} payouts)")
     return 0

@@ -3,14 +3,14 @@ name: KRA OpenAPI payout audit
 on:
   workflow_dispatch:
     inputs:
-      start_month:
-        description: First month (YYYYMM)
+      start_year:
+        description: First year (YYYY)
         required: true
-        default: "201601"
-      end_month:
-        description: Last month (YYYYMM)
+        default: "2016"
+      end_year:
+        description: Last year (YYYY)
         required: true
-        default: "202512"
+        default: "2025"
   push:
     branches:
       - agent/openapi179-historical-audit
@@ -46,8 +46,8 @@ jobs:
       - name: Collect realized payouts and audit missing winners
         run: |
           python3 collect_openapi_payouts.py \
-            --start-month "${{ inputs.start_month || '201601' }}" \
-            --end-month "${{ inputs.end_month || '202512' }}" \
+            --start-year "${{ inputs.start_year || '2016' }}" \
+            --end-year "${{ inputs.end_year || '2025' }}" \
             --out outputs/openapi179
 
       - name: Show report in job summary
