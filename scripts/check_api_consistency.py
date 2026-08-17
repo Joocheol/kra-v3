@@ -145,7 +145,8 @@ def load_race_id_file(path: str) -> set[RaceId]:
     with open(path, "rt", encoding="utf-8", newline="") as fh:
         sample = fh.read(4096)
         fh.seek(0)
-        if "race_id" in sample.splitlines()[0:1][0] if sample.splitlines() else False:
+        first_line = sample.splitlines()[0] if sample.splitlines() else ""
+        if "race_id" in first_line:
             reader = csv.DictReader(fh)
             if not reader.fieldnames or "race_id" not in reader.fieldnames:
                 raise ValueError(f"CSV manifest lacks race_id column: {path}")
@@ -246,17 +247,23 @@ def fetch_year_overview(year: int, *, page_size: int, timeout: float, retries: i
     return all_items
 
 
-def write_diff_csv(path: str | None, rows: Iterable[RaceId], side: str) -> None:
+def write_race_id_csv(path: str | None, rows: Iterable[RaceId], side: str | None = None) -> None:
     if not path:
         return
     out_path = Path(path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "wt", encoding="utf-8", newline="") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["side", "race_id", "date", "meet", "rc_no"])
-        for rid in rows:
-            writer.writerow([side, str(rid), rid.date, rid.meet, rid.rc_no])
-    print(f"wrote {side} csv={out_path}")
+        if side is None:
+            writer.writerow(["race_id", "date", "meet", "rc_no"])
+            for rid in rows:
+                writer.writerow([str(rid), rid.date, rid.meet, rid.rc_no])
+        else:
+            writer.writerow(["side", "race_id", "date", "meet", "rc_no"])
+            for rid in rows:
+                writer.writerow([side, str(rid), rid.date, rid.meet, rid.rc_no])
+    label = side or "race_ids"
+    print(f"wrote {label} csv={out_path}")
 
 
 def check_year(year: int, archive_ids_all: set[RaceId], *, page_size: int, timeout: float, retries: int, diff_dir: str | None, fail_on_diff: bool) -> int:
@@ -276,6 +283,9 @@ def check_year(year: int, archive_ids_all: set[RaceId], *, page_size: int, timeo
         by_meet[rid.meet] = by_meet.get(rid.meet, 0) + 1
     print("api_count_by_meet=" + json.dumps(dict(sorted(by_meet.items())), ensure_ascii=False))
 
+    if diff_dir:
+        write_race_id_csv(str(Path(diff_dir) / f"api_ids_{year}.csv"), sorted(api_ids))
+
     api_only = sorted(api_ids - archive_ids) if archive_ids else []
     archive_only = sorted(archive_ids - api_ids) if archive_ids else []
     matched = sorted(archive_ids & api_ids) if archive_ids else []
@@ -294,8 +304,8 @@ def check_year(year: int, archive_ids_all: set[RaceId], *, page_size: int, timeo
         print(f"ARCHIVE_ONLY ... {len(archive_only) - 20} more")
 
     if diff_dir:
-        write_diff_csv(str(Path(diff_dir) / f"api_only_{year}.csv"), api_only, "api_only")
-        write_diff_csv(str(Path(diff_dir) / f"archive_only_{year}.csv"), archive_only, "archive_only")
+        write_race_id_csv(str(Path(diff_dir) / f"api_only_{year}.csv"), api_only, "api_only")
+        write_race_id_csv(str(Path(diff_dir) / f"archive_only_{year}.csv"), archive_only, "archive_only")
 
     if (api_only or archive_only) and fail_on_diff:
         print(f"year={year} status=diff")
