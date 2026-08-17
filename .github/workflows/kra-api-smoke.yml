@@ -16,7 +16,7 @@ jobs:
     env:
       DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
     steps:
-      - name: Check three KRA OpenAPI endpoints
+      - name: Check KRA OpenAPI endpoints
         run: |
           python3 - <<'PY'
           import json
@@ -36,22 +36,26 @@ jobs:
               {
                   "name": "sales_and_dividend_rate",
                   "url": "http://apis.data.go.kr/B551015/API179_1/salesAndDividendRate_1",
-                  # Documented sample parameters: meet=1, rc_date=20190504.
-                  # Supplying no date asks the provider to search roughly a month,
-                  # which can time out before pagination is applied.
                   "params": {"pageNo": "1", "numOfRows": "1", "meet": "1", "rc_date": "20190504", "rc_no": "1", "_type": "json"},
+                  "required_fields_any": ["amt", "odds", "pool"],
               },
               {
                   "name": "integrated_dividend_rate",
                   "url": "http://apis.data.go.kr/B551015/API160_1/integratedInfo_1",
-                  # Documented sample parameters: pool=TRI, meet=2, rc_date=20220806, rc_no=2.
                   "params": {"pageNo": "1", "numOfRows": "1", "pool": "TRI", "meet": "2", "rc_date": "20220806", "rc_no": "2", "_type": "json"},
+                  "required_fields_any": ["chulNo", "chulNo2", "chulNo3", "odds", "pool"],
               },
               {
-                  "name": "race_detail_result",
+                  "name": "race_detail_result_old_api214",
                   "url": "http://apis.data.go.kr/B551015/API214_1/RaceDetailResult_1",
-                  # Same small race slice as the dividend sample.
                   "params": {"pageNo": "1", "numOfRows": "1", "meet": "2", "rc_date": "20220806", "rc_no": "2", "_type": "json"},
+                  "required_fields_any": ["rank", "chulNo", "hrName", "ord"],
+              },
+              {
+                  "name": "race_detail_result_new_racedetailresult",
+                  "url": "http://apis.data.go.kr/B551015/racedetailresult/getracedetailresult",
+                  "params": {"pageNo": "1", "numOfRows": "1", "meet": "2", "rc_date": "20220806", "rc_no": "2", "_type": "json"},
+                  "required_fields_any": ["rank", "chulNo", "hrName", "ord"],
               },
           ]
 
@@ -73,7 +77,17 @@ jobs:
                   return items
               return [items]
 
+          def report_error_payload(text):
+              try:
+                  obj = json.loads(text)
+                  header = obj.get("OpenAPI_ServiceResponse", {}).get("cmmMsgHeader", {})
+                  if header:
+                      print("error_payload=" + json.dumps(header, ensure_ascii=False, sort_keys=True))
+              except Exception:
+                  pass
+
           failures = []
+          soft_failures = []
           for test in tests:
               params = dict(test["params"])
               params["serviceKey"] = key
@@ -104,9 +118,11 @@ jobs:
               print(f"body_prefix={text[:240].replace(chr(10), ' ')}")
               if status != 200:
                   print("ERROR: non-200 response")
+                  report_error_payload(text)
                   failures.append(test["name"])
                   continue
 
+              handled = False
               try:
                   parsed = json.loads(text)
                   header = get_nested(parsed, "response", "header") or {}
@@ -118,15 +134,24 @@ jobs:
                   print(f"totalCount={body.get('totalCount')}")
                   print(f"item_count={len(items)}")
                   if items and isinstance(items[0], dict):
-                      print("first_item_fields=" + ",".join(sorted(items[0].keys())[:40]))
+                      fields = sorted(items[0].keys())
+                      print("first_item_fields=" + ",".join(fields[:60]))
+                      missing = [f for f in test.get("required_fields_any", []) if f not in fields]
+                      if len(missing) == len(test.get("required_fields_any", [])):
+                          print("WARN: none of the expected representative fields were present")
+                          soft_failures.append(test["name"])
                   if str(header.get("resultCode")) not in {"00", "0", "None"}:
                       print("ERROR: API resultCode is not success")
                       failures.append(test["name"])
                   elif len(items) == 0:
                       print("WARN: call succeeded but returned zero items")
-                  continue
+                      soft_failures.append(test["name"])
+                  handled = True
               except Exception:
                   pass
+
+              if handled:
+                  continue
 
               try:
                   root = ET.fromstring(text)
@@ -137,17 +162,25 @@ jobs:
                   print(f"resultCode={result_code}")
                   print(f"resultMsg={result_msg}")
                   print(f"item_count={len(items)}")
+                  if items:
+                      fields = sorted({child.tag for child in list(items[0])})
+                      print("first_item_fields=" + ",".join(fields[:60]))
                   if result_code not in {"00", "0", None}:
                       print("ERROR: API resultCode is not success")
                       failures.append(test["name"])
                   elif len(items) == 0:
                       print("WARN: call succeeded but returned zero items")
+                      soft_failures.append(test["name"])
               except Exception as exc:
                   print(f"ERROR: response is neither JSON nor XML: {exc}")
                   failures.append(test["name"])
 
           if failures:
               print("\nFAILED_ENDPOINTS=" + ",".join(failures))
+              if soft_failures:
+                  print("WARN_ENDPOINTS=" + ",".join(soft_failures))
               sys.exit(1)
-          print("\nAll KRA OpenAPI smoke tests returned HTTP 200 and parseable success responses.")
+          if soft_failures:
+              print("\nWARN_ENDPOINTS=" + ",".join(soft_failures))
+          print("\nKRA OpenAPI smoke tests completed.")
           PY
