@@ -34,6 +34,12 @@ jobs:
 
           tests = [
               {
+                  "name": "race_overview_api3",
+                  "url": "http://apis.data.go.kr/B551015/API3_1/raceInfo_1",
+                  "params": {"pageNo": "1", "numOfRows": "1", "meet": "1", "rc_date": "20190504", "rc_no": "1", "_type": "json"},
+                  "required_fields_any": ["rcDate", "rcNo", "meet", "totAmt"],
+              },
+              {
                   "name": "sales_and_dividend_rate",
                   "url": "http://apis.data.go.kr/B551015/API179_1/salesAndDividendRate_1",
                   "params": {"pageNo": "1", "numOfRows": "1", "meet": "1", "rc_date": "20190504", "rc_no": "1", "_type": "json"},
@@ -135,7 +141,7 @@ jobs:
                   print(f"item_count={len(items)}")
                   if items and isinstance(items[0], dict):
                       fields = sorted(items[0].keys())
-                      print("first_item_fields=" + ",".join(fields[:60]))
+                      print("first_item_fields=" + ",".join(fields[:80]))
                       missing = [f for f in test.get("required_fields_any", []) if f not in fields]
                       if len(missing) == len(test.get("required_fields_any", [])):
                           print("WARN: none of the expected representative fields were present")
@@ -164,7 +170,7 @@ jobs:
                   print(f"item_count={len(items)}")
                   if items:
                       fields = sorted({child.tag for child in list(items[0])})
-                      print("first_item_fields=" + ",".join(fields[:60]))
+                      print("first_item_fields=" + ",".join(fields[:80]))
                   if result_code not in {"00", "0", None}:
                       print("ERROR: API resultCode is not success")
                       failures.append(test["name"])
