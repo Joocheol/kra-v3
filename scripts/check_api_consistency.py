@@ -26,7 +26,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 API_BASE = "http://apis.data.go.kr/B551015/API3_1/raceInfo_1"
 MEET_CODES = (1, 2, 3)
@@ -158,7 +158,6 @@ def load_race_id_file(path: str) -> set[RaceId]:
             for line in fh:
                 line = line.strip()
                 if line and not line.startswith("#"):
-                    # Accept either one race_id per line or a simple first-column CSV row.
                     first = line.split(",", 1)[0].strip()
                     if first == "race_id":
                         continue
@@ -232,9 +231,9 @@ def fetch_year_meet_overview(
     return all_items
 
 
-def fetch_year_overview(year: int, *, page_size: int, timeout: float, retries: int) -> list[dict]:
+def fetch_year_overview(year: int, *, meets: Sequence[int], page_size: int, timeout: float, retries: int) -> list[dict]:
     all_items: list[dict] = []
-    for meet in MEET_CODES:
+    for meet in meets:
         all_items.extend(
             fetch_year_meet_overview(
                 year,
@@ -266,12 +265,30 @@ def write_race_id_csv(path: str | None, rows: Iterable[RaceId], side: str | None
     print(f"wrote {label} csv={out_path}")
 
 
-def check_year(year: int, archive_ids_all: set[RaceId], *, page_size: int, timeout: float, retries: int, diff_dir: str | None, fail_on_diff: bool) -> int:
-    archive_ids = {rid for rid in archive_ids_all if rid.year == year}
-    print(f"\n=== year {year} ===")
+def suffix_for_meets(meets: Sequence[int]) -> str:
+    if tuple(sorted(meets)) == MEET_CODES:
+        return ""
+    return "_meet" + "-".join(str(x) for x in sorted(meets))
+
+
+def check_year(
+    year: int,
+    archive_ids_all: set[RaceId],
+    *,
+    meets: Sequence[int],
+    page_size: int,
+    timeout: float,
+    retries: int,
+    diff_dir: str | None,
+    fail_on_diff: bool,
+) -> int:
+    meet_set = set(meets)
+    archive_ids = {rid for rid in archive_ids_all if rid.year == year and rid.meet in meet_set}
+    meet_suffix = suffix_for_meets(meets)
+    print(f"\n=== year {year} meets {list(meets)} ===")
     print(f"archive_race_count={len(archive_ids)}")
 
-    api_items = fetch_year_overview(year, page_size=page_size, timeout=timeout, retries=retries)
+    api_items = fetch_year_overview(year, meets=meets, page_size=page_size, timeout=timeout, retries=retries)
     api_ids = {api_item_to_race_id(item) for item in api_items}
     print(f"api_raw_row_count={len(api_items)}")
     print(f"api_unique_race_count={len(api_ids)}")
@@ -284,7 +301,7 @@ def check_year(year: int, archive_ids_all: set[RaceId], *, page_size: int, timeo
     print("api_count_by_meet=" + json.dumps(dict(sorted(by_meet.items())), ensure_ascii=False))
 
     if diff_dir:
-        write_race_id_csv(str(Path(diff_dir) / f"api_ids_{year}.csv"), sorted(api_ids))
+        write_race_id_csv(str(Path(diff_dir) / f"api_ids_{year}{meet_suffix}.csv"), sorted(api_ids))
 
     api_only = sorted(api_ids - archive_ids) if archive_ids else []
     archive_only = sorted(archive_ids - api_ids) if archive_ids else []
@@ -304,20 +321,21 @@ def check_year(year: int, archive_ids_all: set[RaceId], *, page_size: int, timeo
         print(f"ARCHIVE_ONLY ... {len(archive_only) - 20} more")
 
     if diff_dir:
-        write_race_id_csv(str(Path(diff_dir) / f"api_only_{year}.csv"), api_only, "api_only")
-        write_race_id_csv(str(Path(diff_dir) / f"archive_only_{year}.csv"), archive_only, "archive_only")
+        write_race_id_csv(str(Path(diff_dir) / f"api_only_{year}{meet_suffix}.csv"), api_only, "api_only")
+        write_race_id_csv(str(Path(diff_dir) / f"archive_only_{year}{meet_suffix}.csv"), archive_only, "archive_only")
 
     if (api_only or archive_only) and fail_on_diff:
-        print(f"year={year} status=diff")
+        print(f"year={year} meets={list(meets)} status=diff")
         return 1
 
-    print(f"year={year} status=ok")
+    print(f"year={year} meets={list(meets)} status=ok")
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--year", type=int, action="append", required=True)
+    parser.add_argument("--meet", type=int, choices=MEET_CODES, action="append", default=[])
     parser.add_argument("--sample-race-id", action="append", default=[])
     parser.add_argument("--race-id-file", action="append", default=[])
     parser.add_argument("--archive-root", action="append", default=[])
@@ -328,12 +346,14 @@ def main() -> int:
     parser.add_argument("--retries", type=int, default=2)
     args = parser.parse_args()
 
+    meets = tuple(sorted(set(args.meet))) if args.meet else MEET_CODES
     archive_ids = load_archive_race_ids(args.sample_race_id, args.race_id_file, args.archive_root)
     failures = 0
     for year in sorted(set(args.year)):
         failures += check_year(
             year,
             archive_ids,
+            meets=meets,
             page_size=args.page_size,
             timeout=args.timeout,
             retries=args.retries,
