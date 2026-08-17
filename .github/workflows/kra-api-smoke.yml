@@ -17,6 +17,7 @@ jobs:
     timeout-minutes: 8
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         year: [2016, 2017, 2018, 2019, 2022, 2023, 2024, 2025]
         meet: [1, 2, 3]
@@ -60,7 +61,8 @@ jobs:
             --diff-dir findings/api_consistency_diff \
             --fail-on-diff
 
-          The GitHub Actions smoke test splits API manifest checks by meet.
+          The GitHub Actions smoke test splits API manifest checks by meet
+          and throttles concurrency to avoid public API timeouts.
           It writes artifacts named kra-api-race-ids-YYYY-meet-M.
           The full local comparison writes api_ids_YYYY.csv, api_only_YYYY.csv,
           and archive_only_YYYY.csv files.
