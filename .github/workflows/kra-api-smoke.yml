@@ -13,24 +13,23 @@ permissions:
 jobs:
   kra-api-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 6
+    strategy:
+      fail-fast: false
+      matrix:
+        year: [2016, 2017, 2018, 2019, 2022, 2023, 2024, 2025]
     env:
       DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - name: Check all archived years against yearly KRA overview API
+      - name: Check yearly KRA overview API for ${{ matrix.year }}
         run: >-
           python3 scripts/check_api_consistency.py
-          --year 2016
-          --year 2017
-          --year 2018
-          --year 2019
-          --year 2022
-          --year 2023
-          --year 2024
-          --year 2025
+          --year ${{ matrix.year }}
+          --timeout 30
+          --retries 1
           --sample-race-id 2025-01-24_3_08
           --sample-race-id 2025-01-26_3_04
           --sample-race-id 2025-01-04_1_11
