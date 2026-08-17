@@ -1,36 +1,36 @@
 #!/usr/bin/env python3
 """Check KRA OpenAPI consistency against archived race identifiers.
 
-This script is intentionally conservative with API calls.  It reads the race
-overview API by year and meet, because the provider defaults to Seoul when
-``meet`` is omitted.  For the archived years currently in scope this means
-at most 3 calls per year, before pagination.
+This script is conservative with API calls.  It reads the race overview API by
+year and meet, because the provider defaults to Seoul when ``meet`` is omitted.
+For the archived years currently in scope this means at most 3 calls per year,
+before pagination.
 
-Typical use:
+It can do two kinds of checks:
 
-    DATA_GO_KR_SERVICE_KEY=... python3 scripts/check_api_consistency.py \
-      --year 2025 \
-      --sample-race-id 2025-01-24_3_08 \
-      --sample-race-id 2025-01-26_3_04
+1. API-only smoke check, optionally with --sample-race-id values.
+2. Full bidirectional diff if --archive-root or --race-id-file is supplied.
 
-The archive-side input can be either explicit --sample-race-id values or a text
-file with one race_id per line.  A race_id has the form YYYY-MM-DD_meet_rcNo,
-e.g. 2025-01-24_3_08.
+A race_id has the form YYYY-MM-DD_meet_rcNo, e.g. 2025-01-24_3_08.
 """
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
+import re
 import sys
 import time
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
 API_BASE = "http://apis.data.go.kr/B551015/API3_1/raceInfo_1"
 MEET_CODES = (1, 2, 3)
+RACE_FILE_RE = re.compile(r"(?P<date>\d{4}-\d{2}-\d{2})_(?P<meet>\d+)_(?P<rc_no>\d+)\.json\.gz$")
 
 MEET_NAME_TO_CODE = {
     "서울": 1,
@@ -56,13 +56,19 @@ class RaceId:
     @classmethod
     def parse(cls, value: str) -> "RaceId":
         try:
-            date, meet, rc_no = value.strip().replace(".json.gz", "").split("_")
+            base = Path(value.strip()).name
+            base = base.replace(".json.gz", "")
+            date, meet, rc_no = base.split("_")
             year, month, day = date.split("-")
             if len(year) != 4 or len(month) != 2 or len(day) != 2:
                 raise ValueError
             return cls(date=f"{year}-{month}-{day}", meet=int(meet), rc_no=int(rc_no))
         except Exception as exc:  # noqa: BLE001 - report the input value clearly
             raise argparse.ArgumentTypeError(f"invalid race_id {value!r}") from exc
+
+    @property
+    def year(self) -> int:
+        return int(self.date[:4])
 
     @property
     def api_date(self) -> str:
@@ -132,7 +138,7 @@ def call_json(params: dict[str, str], *, timeout: float, retries: int) -> tuple[
     raise RuntimeError(f"API request failed after {retries + 1} attempts: {last_exc}")
 
 
-def load_archive_race_ids(values: Iterable[str], files: Iterable[str]) -> set[RaceId]:
+def load_archive_race_ids(values: Iterable[str], files: Iterable[str], roots: Iterable[str]) -> set[RaceId]:
     out: set[RaceId] = set()
     for value in values:
         if value.strip():
@@ -143,6 +149,16 @@ def load_archive_race_ids(values: Iterable[str], files: Iterable[str]) -> set[Ra
                 line = line.strip()
                 if line and not line.startswith("#"):
                     out.add(RaceId.parse(line))
+    for root in roots:
+        root_path = Path(root).expanduser()
+        if not root_path.exists():
+            raise FileNotFoundError(f"archive root not found: {root_path}")
+        count = 0
+        for file_path in root_path.rglob("*.json.gz"):
+            if RACE_FILE_RE.search(file_path.name):
+                out.add(RaceId.parse(file_path.name))
+                count += 1
+        print(f"archive_root={root_path} race_file_count={count}")
     return out
 
 
@@ -205,10 +221,23 @@ def fetch_year_overview(year: int, *, page_size: int, timeout: float, retries: i
     return all_items
 
 
-def check_year(year: int, archive_ids_all: set[RaceId], *, page_size: int, timeout: float, retries: int) -> int:
-    archive_ids = {rid for rid in archive_ids_all if int(rid.date[:4]) == year}
+def write_diff_csv(path: str | None, rows: Iterable[RaceId], side: str) -> None:
+    if not path:
+        return
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "wt", encoding="utf-8", newline="") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(["side", "race_id", "date", "meet", "rc_no"])
+        for rid in rows:
+            writer.writerow([side, str(rid), rid.date, rid.meet, rid.rc_no])
+    print(f"wrote {side} csv={out_path}")
+
+
+def check_year(year: int, archive_ids_all: set[RaceId], *, page_size: int, timeout: float, retries: int, diff_dir: str | None, fail_on_diff: bool) -> int:
+    archive_ids = {rid for rid in archive_ids_all if rid.year == year}
     print(f"\n=== year {year} ===")
-    print(f"archive_sample_count={len(archive_ids)}")
+    print(f"archive_race_count={len(archive_ids)}")
 
     api_items = fetch_year_overview(year, page_size=page_size, timeout=timeout, retries=retries)
     api_ids = {api_item_to_race_id(item) for item in api_items}
@@ -222,15 +251,29 @@ def check_year(year: int, archive_ids_all: set[RaceId], *, page_size: int, timeo
         by_meet[rid.meet] = by_meet.get(rid.meet, 0) + 1
     print("api_count_by_meet=" + json.dumps(dict(sorted(by_meet.items())), ensure_ascii=False))
 
-    missing = sorted(archive_ids - api_ids)
-    present = sorted(archive_ids & api_ids)
-    print(f"sample_present_count={len(present)}")
-    for rid in present:
-        print(f"present {rid}")
-    if missing:
-        print(f"sample_missing_count={len(missing)}")
-        for rid in missing:
-            print(f"MISSING {rid}")
+    api_only = sorted(api_ids - archive_ids) if archive_ids else []
+    archive_only = sorted(archive_ids - api_ids) if archive_ids else []
+    matched = sorted(archive_ids & api_ids) if archive_ids else []
+
+    print(f"matched_count={len(matched)}")
+    print(f"api_only_count={len(api_only)}")
+    print(f"archive_only_count={len(archive_only)}")
+
+    for rid in api_only[:20]:
+        print(f"API_ONLY {rid}")
+    if len(api_only) > 20:
+        print(f"API_ONLY ... {len(api_only) - 20} more")
+    for rid in archive_only[:20]:
+        print(f"ARCHIVE_ONLY {rid}")
+    if len(archive_only) > 20:
+        print(f"ARCHIVE_ONLY ... {len(archive_only) - 20} more")
+
+    if diff_dir:
+        write_diff_csv(str(Path(diff_dir) / f"api_only_{year}.csv"), api_only, "api_only")
+        write_diff_csv(str(Path(diff_dir) / f"archive_only_{year}.csv"), archive_only, "archive_only")
+
+    if (api_only or archive_only) and fail_on_diff:
+        print(f"year={year} status=diff")
         return 1
 
     print(f"year={year} status=ok")
@@ -242,12 +285,15 @@ def main() -> int:
     parser.add_argument("--year", type=int, action="append", required=True)
     parser.add_argument("--sample-race-id", action="append", default=[])
     parser.add_argument("--race-id-file", action="append", default=[])
+    parser.add_argument("--archive-root", action="append", default=[])
+    parser.add_argument("--diff-dir", default=None)
+    parser.add_argument("--fail-on-diff", action="store_true")
     parser.add_argument("--page-size", type=int, default=10000)
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--retries", type=int, default=2)
     args = parser.parse_args()
 
-    archive_ids = load_archive_race_ids(args.sample_race_id, args.race_id_file)
+    archive_ids = load_archive_race_ids(args.sample_race_id, args.race_id_file, args.archive_root)
     failures = 0
     for year in sorted(set(args.year)):
         failures += check_year(
@@ -256,6 +302,8 @@ def main() -> int:
             page_size=args.page_size,
             timeout=args.timeout,
             retries=args.retries,
+            diff_dir=args.diff_dir,
+            fail_on_diff=args.fail_on_diff,
         )
 
     if failures:
