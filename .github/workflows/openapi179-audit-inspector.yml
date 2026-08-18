@@ -13,7 +13,11 @@ jobs:
   inspect:
     runs-on: ubuntu-latest
     steps:
-      - name: Inspect payout audit runs
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Inspect and verify latest payout audit
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -29,19 +33,94 @@ jobs:
           for r in runs[:20]:
               print('PAYOUT_RUN', r.get('id'), r.get('status'), r.get('conclusion'), r.get('event'), r.get('head_sha'), r.get('run_number'), r.get('run_attempt'), r.get('created_at'), r.get('updated_at'))
           if not runs:
-              raise SystemExit(0)
-          print(f'LATEST_RUN_ID={runs[0]["id"]}')
+              raise SystemExit('no payout audit runs found')
+          latest=runs[0]
+          if latest.get('status')!='completed' or latest.get('conclusion')!='success':
+              raise SystemExit(f'latest payout audit is not successful: {latest}')
+          print(f'LATEST_RUN_ID={latest["id"]}')
           PY
           run_id="$(python3 - <<'PY'
           import json
           p=json.load(open('/tmp/runs.json'))
           runs=[r for r in p.get('workflow_runs',[]) if r.get('name')=='KRA OpenAPI payout audit']
-          print(runs[0]['id'] if runs else '')
+          print(runs[0]['id'])
           PY
           )"
-          if [ -n "$run_id" ]; then
-            echo '---LATEST_JOBS---'
-            gh api "/repos/${repo}/actions/runs/${run_id}/jobs?filter=latest&per_page=100" --jq '.jobs[] | [.id,.name,.status,.conclusion,.started_at,.completed_at] | @tsv'
-            echo '---LATEST_ARTIFACTS---'
-            gh api "/repos/${repo}/actions/runs/${run_id}/artifacts?per_page=100" --jq '.artifacts[] | [.id,.name,.size_in_bytes,.expired,.created_at] | @tsv'
-          fi
+          echo '---LATEST_JOBS---'
+          gh api "/repos/${repo}/actions/runs/${run_id}/jobs?filter=latest&per_page=100" --jq '.jobs[] | [.id,.name,.status,.conclusion,.started_at,.completed_at] | @tsv'
+          artifact_id="$(gh api "/repos/${repo}/actions/runs/${run_id}/artifacts?per_page=100" --jq '[.artifacts[] | select(.name=="kra-openapi179-audit" and .expired==false)] | first | .id // empty')"
+          test -n "$artifact_id"
+          echo "LATEST_ARTIFACT_ID=$artifact_id"
+          gh api "/repos/${repo}/actions/artifacts/${artifact_id}/zip" > /tmp/openapi179.zip
+          mkdir -p /tmp/openapi179
+          unzip -q /tmp/openapi179.zip -d /tmp/openapi179
+
+          python3 - <<'PY'
+          import csv, gzip, json
+          from pathlib import Path
+          from collections import Counter
+
+          target_years=(2016,2017,2018,2019,2022,2023,2024,2025)
+          meets=(1,2,3)
+          root=Path('/tmp/openapi179')
+
+          with gzip.open('데이터/races.jsonl.gz','rt',encoding='utf-8') as f:
+              races=[json.loads(line) for line in f]
+          archive_ids={r['race_id'] for r in races if int(str(r['race_id'])[:4]) in target_years}
+
+          with gzip.open(root/'openapi179_rows.csv.gz','rt',encoding='utf-8',newline='') as f:
+              rows=list(csv.DictReader(f))
+          api_ids={r['race_id'] for r in rows if int(r['rc_date'][:4]) in target_years}
+
+          with (root/'openapi179_missing_candidates.csv').open(encoding='utf-8',newline='') as f:
+              mismatches=list(csv.DictReader(f))
+          mismatches=[r for r in mismatches if int(r['date'][:4]) in target_years]
+
+          checkpoint_missing=[]
+          totals=Counter()
+          all_archive_only=[]
+          all_api_only=[]
+          for year in target_years:
+              for meet in meets:
+                  cp=root/'checkpoints'/f'{year}_{meet}.jsonl.gz'
+                  if not cp.exists():
+                      checkpoint_missing.append(f'{year}_{meet}')
+                      cp_rows=-1
+                  else:
+                      with gzip.open(cp,'rt',encoding='utf-8') as f:
+                          cp_rows=sum(1 for _ in f)
+                  a={x for x in archive_ids if x.startswith(f'{year}-') and int(x.split('_')[1])==meet}
+                  b={x for x in api_ids if x.startswith(f'{year}-') and int(x.split('_')[1])==meet}
+                  ao=sorted(a-b)
+                  bo=sorted(b-a)
+                  mm=[r for r in mismatches if int(r['date'][:4])==year and int(r['meet'])==meet]
+                  all_archive_only.extend(ao)
+                  all_api_only.extend(bo)
+                  print('COMBO',year,meet,
+                        f'checkpoint_rows={cp_rows}',
+                        f'archive_races={len(a)}',
+                        f'api179_races={len(b)}',
+                        f'matched={len(a&b)}',
+                        f'archive_only={len(ao)}',
+                        f'api_only={len(bo)}',
+                        f'payout_mismatch={len(mm)}')
+                  totals['checkpoint_rows']+=max(cp_rows,0)
+                  totals['archive']+=len(a)
+                  totals['api']+=len(b)
+                  totals['matched']+=len(a&b)
+                  totals['archive_only']+=len(ao)
+                  totals['api_only']+=len(bo)
+                  totals['mismatch']+=len(mm)
+
+          print('TARGET_COMBOS',len(target_years)*len(meets))
+          print('CHECKPOINT_MISSING',len(checkpoint_missing),*checkpoint_missing)
+          print('TOTALS',dict(totals))
+          for rid in all_archive_only:
+              print('ARCHIVE_ONLY',rid)
+          for rid in all_api_only:
+              print('API_ONLY',rid)
+          for r in mismatches:
+              print('PAYOUT_MISMATCH',r['race_id'],r['pool'],r['expected_combination'],r['paid_combinations'],r['candidate_class'],r['warning'])
+          if checkpoint_missing:
+              raise SystemExit('missing target checkpoints')
+          PY
