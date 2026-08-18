@@ -1,0 +1,70 @@
+name: KRA OpenAPI smoke test
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/kra-api-smoke.yml'
+      - 'scripts/check_api_consistency.py'
+      - 'findings/api_consistency_mismatch_report.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kra-api-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        year: [2016, 2017, 2018, 2019, 2022, 2023, 2024, 2025]
+        meet: [1, 2, 3]
+    env:
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Check KRA overview API for ${{ matrix.year }} meet ${{ matrix.meet }}
+        run: >-
+          python3 scripts/check_api_consistency.py
+          --year ${{ matrix.year }}
+          --meet ${{ matrix.meet }}
+          --timeout 180
+          --retries 2
+          --diff-dir findings/api_consistency_diff
+          --sample-race-id 2025-01-24_3_08
+          --sample-race-id 2025-01-26_3_04
+          --sample-race-id 2025-01-04_1_11
+          --sample-race-id 2025-01-17_2_05
+          --sample-race-id 2025-01-10_2_02
+
+      - name: Upload API race-id manifest for ${{ matrix.year }} meet ${{ matrix.meet }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kra-api-race-ids-${{ matrix.year }}-meet-${{ matrix.meet }}
+          path: findings/api_consistency_diff/api_ids_${{ matrix.year }}_meet${{ matrix.meet }}.csv
+          if-no-files-found: error
+
+      - name: Show full local bidirectional diff command
+        run: |
+          cat <<'EOF'
+          To run the full bidirectional archive/API comparison on a machine
+          where Dropbox is synced, use:
+
+          python3 scripts/check_api_consistency.py \
+            --year 2016 --year 2017 --year 2018 --year 2019 \
+            --year 2022 --year 2023 --year 2024 --year 2025 \
+            --archive-root "$HOME/Dropbox/kra-analysis/data/raw_collected_v3_15w" \
+            --diff-dir findings/api_consistency_diff \
+            --fail-on-diff
+
+          The GitHub Actions smoke test splits API manifest checks by meet
+          and throttles concurrency to avoid public API timeouts.
+          Long-response jobs use a 180-second request timeout.
+          It writes artifacts named kra-api-race-ids-YYYY-meet-M.
+          The full local comparison writes api_ids_YYYY.csv, api_only_YYYY.csv,
+          and archive_only_YYYY.csv files.
+          EOF

@@ -1,0 +1,201 @@
+name: Finalize KRA API consistency
+
+on:
+  push:
+    branches:
+      - agent/kra-api-smoke-test
+    paths:
+      - '.github/workflows/finalize-api-consistency.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SOURCE_RUN_ID: '32078736924'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: true
+
+      - name: Download all 24 API race-id artifacts from completed smoke run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/kra-api-artifacts
+          gh api --paginate "/repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.name | startswith("kra-api-race-ids-")) | [.id,.name] | @tsv' \
+            > /tmp/kra-api-artifacts/list.tsv
+          test "$(wc -l < /tmp/kra-api-artifacts/list.tsv)" -eq 24
+          while IFS=$'\t' read -r id name; do
+            gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip" \
+              > "/tmp/kra-api-artifacts/${name}.zip"
+            mkdir -p "/tmp/kra-api-artifacts/${name}"
+            unzip -q "/tmp/kra-api-artifacts/${name}.zip" \
+              -d "/tmp/kra-api-artifacts/${name}"
+          done < /tmp/kra-api-artifacts/list.tsv
+
+      - name: Compute exact bidirectional set differences
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import csv, gzip, json, re
+          from collections import Counter, defaultdict
+          from pathlib import Path
+
+          years = [2016, 2017, 2018, 2019, 2022, 2023, 2024, 2025]
+          rid_re = re.compile(r'^(\d{4}-\d{2}-\d{2})_(\d+)_(\d+)$')
+
+          def norm(x):
+              m = rid_re.match(str(x).strip().replace('.json.gz',''))
+              if not m:
+                  raise ValueError(f'bad race id: {x!r}')
+              return f'{m.group(1)}_{int(m.group(2))}_{int(m.group(3)):02d}'
+
+          # Archive-derived canonical race index. manifest.json records that this was
+          # generated from /kra-analysis/data/raw_collected_v3_15w and has 19,301 races.
+          archive = set()
+          by_archive_year = Counter()
+          with gzip.open('데이터/races.jsonl.gz', 'rt', encoding='utf-8') as fh:
+              for line in fh:
+                  if not line.strip():
+                      continue
+                  row = json.loads(line)
+                  value = row.get('race_id') or row.get('id')
+                  if value is None:
+                      date = row.get('date') or row.get('race_date') or row.get('rc_date')
+                      meet = row.get('meet') or row.get('meet_code')
+                      rcno = row.get('rc_no') or row.get('race_no') or row.get('rcNo')
+                      if date is not None and meet is not None and rcno is not None:
+                          date = str(date)
+                          if len(date) == 8 and date.isdigit():
+                              date = f'{date[:4]}-{date[4:6]}-{date[6:]}'
+                          value = f'{date}_{meet}_{rcno}'
+                  if value is None:
+                      raise RuntimeError(f'cannot find race id fields: {sorted(row)[:30]}')
+                  rid = norm(value)
+                  archive.add(rid)
+          if len(archive) != 19301:
+              raise RuntimeError(f'archive index expected 19301 unique races, got {len(archive)}')
+          for rid in archive:
+              by_archive_year[int(rid[:4])] += 1
+
+          api = set()
+          raw_api_rows = 0
+          by_api_ym = Counter()
+          root = Path('/tmp/kra-api-artifacts')
+          for csv_path in root.glob('kra-api-race-ids-*/*.csv'):
+              with csv_path.open(newline='', encoding='utf-8') as fh:
+                  for row in csv.DictReader(fh):
+                      raw_api_rows += 1
+                      rid = norm(row['race_id'])
+                      api.add(rid)
+                      m = rid_re.match(rid)
+                      by_api_ym[(int(m.group(1)[:4]), int(m.group(2)))] += 1
+          if raw_api_rows != 20777 or len(api) != 20777:
+              raise RuntimeError(f'API expected 20777 rows/unique, got rows={raw_api_rows}, unique={len(api)}')
+
+          out = Path('findings/api_consistency_diff')
+          out.mkdir(parents=True, exist_ok=True)
+          summary = []
+          grand_matched = grand_api_only = grand_archive_only = 0
+          for year in years:
+              a = {x for x in archive if int(x[:4]) == year}
+              p = {x for x in api if int(x[:4]) == year}
+              matched = sorted(a & p)
+              api_only = sorted(p - a)
+              archive_only = sorted(a - p)
+              grand_matched += len(matched)
+              grand_api_only += len(api_only)
+              grand_archive_only += len(archive_only)
+              summary.append((year, len(p), len(a), len(matched), len(api_only), len(archive_only)))
+              for name, rows, side in [
+                  (f'api_only_{year}.csv', api_only, 'api_only'),
+                  (f'archive_only_{year}.csv', archive_only, 'archive_only'),
+              ]:
+                  with (out/name).open('w', newline='', encoding='utf-8') as fh:
+                      w = csv.writer(fh)
+                      w.writerow(['side','race_id','date','meet','rc_no'])
+                      for rid in rows:
+                          date, meet, rcno = rid.rsplit('_',2)
+                          w.writerow([side, rid, date, int(meet), int(rcno)])
+
+          with (out/'summary.csv').open('w', newline='', encoding='utf-8') as fh:
+              w = csv.writer(fh)
+              w.writerow(['year','api','archive','matched','api_only','archive_only'])
+              w.writerows(summary)
+              w.writerow(['TOTAL', len(api), len(archive), grand_matched, grand_api_only, grand_archive_only])
+
+          # Preserve the already hand-confirmed 2025 subset check as an invariant.
+          confirmed = Path('findings/api_only_2025_confirmed.csv')
+          confirmed_ids = set()
+          if confirmed.exists():
+              with confirmed.open(newline='', encoding='utf-8') as fh:
+                  for row in csv.DictReader(fh):
+                      if row.get('race_id'):
+                          confirmed_ids.add(norm(row['race_id']))
+          api_only_2025 = {x for x in api - archive if x.startswith('2025-')}
+          missing_confirmed = sorted(confirmed_ids - api_only_2025)
+          if missing_confirmed:
+              raise RuntimeError(f'previously confirmed 2025 API-only ids not reproduced: {missing_confirmed[:10]}')
+
+          lines = [
+              '# KRA OpenAPI vs Dropbox archive consistency findings', '',
+              '## Final status', '',
+              f'- Source smoke run: `{int(32078736924)}` (24/24 year×meet artifacts succeeded).',
+              f'- API race IDs: **{len(api):,}** unique records; duplicate API race IDs: **{raw_api_rows-len(api):,}**.',
+              f'- Dropbox-archive-derived canonical race index: **{len(archive):,}** unique records.',
+              f'- Exact intersection: **{grand_matched:,}** races.',
+              f'- API only: **{grand_api_only:,}** races.',
+              f'- Archive only: **{grand_archive_only:,}** races.',
+              f'- Previously hand-confirmed 2025 API-only subset reproduced: **{len(confirmed_ids):,}/{len(confirmed_ids):,}**.',
+              '',
+              'The archive index is `데이터/races.jsonl.gz`, generated from the Dropbox root recorded in `데이터/manifest.json` as `/kra-analysis/data/raw_collected_v3_15w`. The Dropbox connector was also checked and exposes the same eight yearly source folders.',
+              '', '## Exact counts by year', '',
+              '| year | API | archive | matched | API only | archive only |',
+              '|---:|---:|---:|---:|---:|---:|',
+          ]
+          for y,p,a,m,po,ao in summary:
+              lines.append(f'| {y} | {p:,} | {a:,} | {m:,} | {po:,} | {ao:,} |')
+          lines += [
+              f'| **Total** | **{len(api):,}** | **{len(archive):,}** | **{grand_matched:,}** | **{grand_api_only:,}** | **{grand_archive_only:,}** |',
+              '', '## API manifest counts by year × meet', '',
+              '| year | meet 1 | meet 2 | meet 3 | total |',
+              '|---:|---:|---:|---:|---:|',
+          ]
+          for y in years:
+              vals=[by_api_ym[(y,m)] for m in (1,2,3)]
+              lines.append(f'| {y} | {vals[0]:,} | {vals[1]:,} | {vals[2]:,} | {sum(vals):,} |')
+          lines += [
+              '', '## Machine-readable exact differences', '',
+              'For each target year, the exact set differences are committed under `findings/api_consistency_diff/` as:',
+              '', '- `api_only_YYYY.csv`', '- `archive_only_YYYY.csv`', '- `summary.csv`', '',
+              'These are exact race-ID set differences, not differences inferred from monthly totals.',
+              '', '## Interpretation', '',
+              'The smoke-test timeouts observed in earlier attempts were transport failures. They disappeared after retries; all 24 manifests were ultimately produced. Any nonzero final differences reported above therefore represent coverage differences between the KRA OpenAPI race index and the preserved Dropbox archive-derived race index, not failed API jobs.',
+              '', 'The comparison is about race presence/absence only. It does not by itself establish that every field inside a matched race file is identical to the current API response.',
+          ]
+          Path('findings/api_consistency_mismatch_report.md').write_text('\n'.join(lines)+'\n', encoding='utf-8')
+          print('\n'.join(lines))
+          PY
+
+      - name: Commit final consistency findings to PR branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add findings/api_consistency_mismatch_report.md findings/api_consistency_diff/
+          git diff --cached --stat
+          if git diff --cached --quiet; then
+            echo 'No findings changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Finalize KRA API/archive consistency audit'
+          git push
