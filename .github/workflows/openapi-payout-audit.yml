@@ -1,0 +1,94 @@
+name: KRA OpenAPI payout audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_year:
+        description: First year (YYYY)
+        required: true
+        default: "2016"
+      end_year:
+        description: Last year (YYYY)
+        required: true
+        default: "2025"
+  push:
+    branches:
+      - agent/openapi179-historical-audit
+    paths:
+      - collect_openapi_payouts.py
+      - test_collect_openapi_payouts.py
+      - .github/workflows/openapi-payout-audit.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DATA_GO_KR_SERVICE_KEY: ${{ secrets.DATA_GO_KR_SERVICE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify secret is available
+        shell: bash
+        run: |
+          if [ "${#DATA_GO_KR_SERVICE_KEY}" -le 20 ]; then
+            echo "DATA_GO_KR_SERVICE_KEY is missing or implausibly short" >&2
+            exit 1
+          fi
+          echo "Service key is available"
+
+      - name: Run collector unit tests
+        run: python3 -m unittest discover -s tests -p 'test_openapi_payouts.py' -v
+
+      - name: Restore latest OpenAPI checkpoints
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          artifact_id="$(
+            gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts?name=kra-openapi179-audit&per_page=100" \
+              --jq '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | last | .id // empty'
+          )"
+          if [ -n "$artifact_id" ]; then
+            gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+              > "$RUNNER_TEMP/openapi179-checkpoints.zip"
+            mkdir -p outputs/openapi179
+            unzip -q -o "$RUNNER_TEMP/openapi179-checkpoints.zip" -d outputs/openapi179
+            echo "Restored checkpoint artifact $artifact_id"
+          else
+            echo "No prior checkpoint artifact found"
+          fi
+
+      - name: Collect realized payouts and audit missing winners
+        shell: bash
+        run: |
+          for attempt in 1 2 3; do
+            if python3 collect_openapi_payouts.py \
+              --start-year "${{ inputs.start_year || '2016' }}" \
+              --end-year "${{ inputs.end_year || '2025' }}" \
+              --out outputs/openapi179 \
+              --resume; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            echo "API179 attempt $attempt failed; resuming from checkpoints" >&2
+            sleep 30
+          done
+
+      - name: Show report in job summary
+        run: cat outputs/openapi179/openapi179_report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload audit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kra-openapi179-audit
+          path: outputs/openapi179/
+          if-no-files-found: error
+          retention-days: 30

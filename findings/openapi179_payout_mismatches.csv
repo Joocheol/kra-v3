@@ -1,0 +1,2 @@
+race_id,date,meet,meet_name,race_no,pool,turnover_won,expected_combination,paid_combinations,raw_odds,candidate_class,archive_crosscheck,interpretation
+2016-07-01_2_08,2016-07-01,2,제주,8,연승식,197800,3,"4 8","④-1.3  ⑧-1.5",expected_combination_unpaid,"archive arrival=8-4-3; Scm placeholder_9999_9_count=1","API179 omits horse 3 from realized payout rows while archived Scm contains one 9999.9 placeholder; treat as a payout-representation mismatch/no-ticket-or-placeholder case, not an archive race-coverage failure"
