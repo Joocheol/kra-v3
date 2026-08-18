@@ -1,0 +1,47 @@
+name: Inspect OpenAPI179 audit status
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/openapi179-audit-inspector.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect payout audit runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          gh api "/repos/${repo}/actions/runs?branch=agent/openapi179-historical-audit&per_page=100" > /tmp/runs.json
+          python3 - <<'PY'
+          import json
+          p=json.load(open('/tmp/runs.json'))
+          runs=[r for r in p.get('workflow_runs',[]) if r.get('name')=='KRA OpenAPI payout audit']
+          print(f'PAYOUT_RUN_COUNT={len(runs)}')
+          for r in runs[:20]:
+              print('PAYOUT_RUN', r.get('id'), r.get('status'), r.get('conclusion'), r.get('event'), r.get('head_sha'), r.get('run_number'), r.get('run_attempt'), r.get('created_at'), r.get('updated_at'))
+          if not runs:
+              raise SystemExit(0)
+          print(f'LATEST_RUN_ID={runs[0]["id"]}')
+          PY
+          run_id="$(python3 - <<'PY'
+          import json
+          p=json.load(open('/tmp/runs.json'))
+          runs=[r for r in p.get('workflow_runs',[]) if r.get('name')=='KRA OpenAPI payout audit']
+          print(runs[0]['id'] if runs else '')
+          PY
+          )"
+          if [ -n "$run_id" ]; then
+            echo '---LATEST_JOBS---'
+            gh api "/repos/${repo}/actions/runs/${run_id}/jobs?filter=latest&per_page=100" --jq '.jobs[] | [.id,.name,.status,.conclusion,.started_at,.completed_at] | @tsv'
+            echo '---LATEST_ARTIFACTS---'
+            gh api "/repos/${repo}/actions/runs/${run_id}/artifacts?per_page=100" --jq '.artifacts[] | [.id,.name,.size_in_bytes,.expired,.created_at] | @tsv'
+          fi
