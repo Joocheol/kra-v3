@@ -144,6 +144,36 @@ dual-discounted Harville(`lambda2=0.800`, `lambda3=0.675`)을 2025년에
 
 ## 재현
 
+### 공식 v1.0 입력 연결
+
+공식 정규화 입력은 Dropbox의
+`/앱/kra-data/research/2016-2025/`에 있는 `kra-data v1.0`이다. 저장소에는
+대용량 정본을 복제하지 않으며, 로컬 복사본의 위치를 `KRA_CANONICAL_DIR`로
+지정한다. 다음 명령은 7개 payload의 SHA-256과 schema/count 계약을 v1.0에
+고정해 확인한다.
+
+```bash
+export KRA_CANONICAL_DIR=/path/to/kra-data-v1.0
+python3 prepare_canonical_input.py --check-only
+```
+
+현재 분석기는 HTML 격자 인터페이스를 사용하므로, 아래 어댑터가 정본을 별도
+입력 트리로 변환한다. 기본 연도는 동결한 연구 프로토콜과 같은
+2016--2019·2022--2025이며, 기존 `데이터/`와 동결 산출물은 덮어쓰지 않는다.
+
+```bash
+python3 prepare_canonical_input.py
+python3 validate_cross_market_inputs.py --data-dir outputs/canonical-v1.0
+```
+
+새 정본에서 이 조건을 만족하는 경주는 19,485개로, 기존 HTML 원자료의
+19,301개보다 184개 많다. 또한 정본에는 2020·2021년이 있으나 현재 연구 표본에는
+자동으로 넣지 않는다. 새 경주와 두 연도를 포함한 재분석은 입력 연결과 분리해
+표본 규칙 및 동결 결과의 변경으로 별도 검증한다. 필요할 때만 명시적으로
+`--years 2016-2025`를 사용한다.
+
+### 동결 분석 재현
+
 ```bash
 python3 -m pip install -r requirements-analysis.txt
 python3 -m unittest discover -s tests -v
