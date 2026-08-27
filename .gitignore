@@ -1,5 +1,8 @@
 outputs/parsed/
 outputs/winning_payout_html/
+outputs/canonical-v1.0/
+outputs/.canonical-v1.0-*/
+canonical-v1.0/
 
 # 환경
 .venv/
