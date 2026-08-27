@@ -163,7 +163,9 @@ python3 prepare_canonical_input.py --check-only
 
 ```bash
 python3 prepare_canonical_input.py
-python3 validate_cross_market_inputs.py --data-dir outputs/canonical-v1.0
+python3 validate_cross_market_inputs.py \
+  --data-dir outputs/canonical-v1.0 \
+  --report outputs/canonical-v1.0/cross_market_input_validation.md
 ```
 
 새 정본에서 이 조건을 만족하는 경주는 19,485개로, 기존 HTML 원자료의
